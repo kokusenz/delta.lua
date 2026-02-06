@@ -1,0 +1,1 @@
+require('delta').setup()

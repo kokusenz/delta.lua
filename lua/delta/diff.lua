@@ -1,0 +1,474 @@
+local M = {}
+
+---Check if Treesitter is attached to a buffer
+---@param bufnr number
+---@return boolean
+local function is_treesitter_attached(bufnr)
+    -- Check if treesitter is available
+    local has_ts, ts_highlighter = pcall(require, "vim.treesitter.highlighter")
+    if not has_ts then
+        return false
+    end
+
+    -- Check if buffer has an active treesitter highlighter
+    return ts_highlighter.active[bufnr] ~= nil
+end
+
+-- helper for test troubleshooting: Recursively print keys and values of a table
+local function print_table(tbl, indent)
+    indent = indent or 0
+    local space = string.rep("  ", indent)
+
+    for key, value in pairs(tbl) do
+        if type(value) == "table" then
+            print(space .. tostring(key) .. ":")
+            print_table(value, indent + 1)
+        else
+            print(space .. tostring(key) .. ": " .. tostring(value))
+        end
+    end
+end
+
+---Copy highlighting from source buffer to target buffer using line mapping
+---@param source_buf number
+---@param target_buf number
+---@param line_map table<number, number> Maps source line numbers to target line numbers
+---@return number count Number of extmarks copied
+local function copy_highlighting(source_buf, target_buf, line_map)
+    -- Validate buffers
+    if not vim.api.nvim_buf_is_valid(source_buf) or not vim.api.nvim_buf_is_valid(target_buf) then
+        return 0
+    end
+
+    -- Get all namespaces
+    local namespaces = vim.api.nvim_get_namespaces()
+
+    -- Collect all extmarks from all namespaces
+    local all_marks = {}
+    for name, ns_id in pairs(namespaces) do
+        local ok, marks = pcall(vim.api.nvim_buf_get_extmarks, source_buf, ns_id, 0, -1, { details = true })
+        if ok and marks then
+            for _, mark in ipairs(marks) do
+                table.insert(all_marks, mark)
+            end
+        end
+    end
+
+    print(string.format("[Delta] Found %d extmarks in source buffer %d", #all_marks, source_buf))
+
+    -- Create a namespace for our highlighting
+    local ns_id = vim.api.nvim_create_namespace("delta_highlight")
+
+    local copied_count = 0
+    for _, mark in ipairs(all_marks) do
+        local line = mark[2]
+        local col = mark[3]
+        local details = mark[4]
+
+        -- Check if this line is in our mapping
+        local target_line = line_map[line + 1] -- +1 because extmarks are 0-indexed, our map is 1-indexed
+        if target_line and details.hl_group then
+            -- Copy the extmark to the target buffer
+            local ok = pcall(vim.api.nvim_buf_set_extmark, target_buf, ns_id, target_line - 1, col, {
+                end_line = details.end_row,
+                end_col = details.end_col,
+                hl_group = details.hl_group,
+            })
+            if ok then
+                copied_count = copied_count + 1
+            end
+        end
+    end
+
+    print(string.format("[Delta] Copied %d extmarks to target buffer %d", copied_count, target_buf))
+    return copied_count
+end
+
+---Set up highlighting copy with Treesitter event handling
+---@param source_buf number
+---@param target_buf number
+---@param line_map table<number, number>
+local function setup_highlight_copy(source_buf, target_buf, line_map)
+    -- If Treesitter is already attached, copy immediately
+    if is_treesitter_attached(source_buf) then
+        print(string.format("[Delta] Treesitter already attached to buffer %d, copying highlights immediately",
+            source_buf))
+        vim.schedule(function()
+            copy_highlighting(source_buf, target_buf, line_map)
+        end)
+        return
+    end
+
+    print(string.format("[Delta] Treesitter not yet attached to buffer %d, setting up event listener", source_buf))
+
+    -- Set up autocmd to listen for Treesitter attachment
+    -- We listen for FileType event which triggers after syntax/treesitter loads
+    local augroup = vim.api.nvim_create_augroup("DeltaHighlightCopy_" .. source_buf, { clear = true })
+
+    vim.api.nvim_create_autocmd({ "FileType", "Syntax" }, {
+        group = augroup,
+        buffer = source_buf,
+        once = true, -- Only trigger once
+        callback = function()
+            -- Small delay to ensure Treesitter has actually attached
+            vim.defer_fn(function()
+                if is_treesitter_attached(source_buf) then
+                    print(string.format("[Delta] Treesitter attached to buffer %d, copying highlights", source_buf))
+                    copy_highlighting(source_buf, target_buf, line_map)
+                    -- Clean up the autocmd group
+                    pcall(vim.api.nvim_del_augroup_by_id, augroup)
+                end
+            end, 100)
+        end,
+    })
+end
+
+
+--- if git, do the appropriate logic to use that command and use that logic
+--- if normal, use vim.text.diff stuff
+--- @param ref string
+--- @param path string | nil
+M.git_diff = function(ref, path)
+    -- get the output of the git diff, pass into get_hunks
+    --local current_bufnr = vim.api.nvim_get_current_buf()
+
+    local cmd = string.format('git diff %s', vim.fn.shellescape(ref))
+    if path ~= nil then
+        cmd = string.format(cmd .. ' -- %s', vim.fn.shellescape(path))
+    end
+    local handle = io.popen(cmd)
+
+    if not handle then
+        vim.notify("Failed to run git diff", vim.log.levels.ERROR)
+        return
+    end
+
+    local diffstring = handle:read("*a")
+    handle:close()
+
+    if diffstring == "" then
+        vim.notify("No changes detected in current file", vim.log.levels.WARN)
+        return
+    end
+
+    local data = M.get_diff_data_directory(diffstring)
+    --print_table(data)
+    local buf_id = M.create_formatted_buffer(data)
+    M.highlight_git_diff(data, buf_id)
+
+    vim.cmd('vsplit')
+    vim.api.nvim_win_set_buf(0, buf_id)
+end
+
+--- TODO; align this with the interface that mini.diff provides, such that codecompanion/ai tooling can use for their diffs. maybe that isn't using paths; I don't know how ai does it. Maybe the llm generates patches directly, and mini.diff can take patch files as input
+--- will always treat f1 as the buffer that should align with the code in your real project; will open a buffer for it as to try to lsp it up
+--- @param f1 string path of file 1
+--- @param f2 string path of file 2
+M.vim_diff = function(f1, f2)
+    -- f1 open buffer, then get the lines content from buffer; maybe io.popen('cat ...').read
+    local old_file = ''
+    -- f2 do not open buffer, just need text contents
+    local new_file = ''
+
+    -- Generate diff using vim.text.diff
+    local vimdiff = vim.text.diff(old_file, new_file, { ctxlen = 3, algorithm = 'myers' })
+    -- launch buffer, same behavior as git_diff from here
+end
+
+--- @param diff string a diff output
+--- @return DirectoryDiffData
+M.get_diff_data_directory = function(diff)
+    local lines = vim.split(diff, '\n', { plain = true })
+
+    --- @type DirectoryDiffData
+    local result = {
+        files = {}
+    }
+
+    local current_file_lines = {}
+    local current_old_path = nil
+    local current_new_path = nil
+
+    -- Helper function to process accumulated file lines
+    local function finalize_current_file()
+        if #current_file_lines > 0 and current_new_path then
+            local file_diff_string = table.concat(current_file_lines, '\n')
+            local file_data = M.get_diff_data_file(file_diff_string)
+            file_data.old_path = current_old_path
+            file_data.new_path = current_new_path
+            result.files[current_new_path] = file_data
+
+            -- Reset for next file
+            current_file_lines = {}
+            current_old_path = nil
+            current_new_path = nil
+        end
+    end
+
+    for _, line in ipairs(lines) do
+        -- File header: --- a/path/to/file
+        if line:match('^%-%-%-') then
+            -- Finalize previous file before starting new one
+            finalize_current_file()
+
+            current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+(.+)$')
+
+            -- File header: +++ b/path/to/file
+        elseif line:match('^%+%+%+') then
+            current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+(.+)$')
+
+            -- Skip git metadata lines (diff, index, etc.)
+        elseif line:match('^diff ') or line:match('^index ') then
+            -- Skip these lines
+
+            -- Everything else belongs to the current file (hunks and their content)
+        else
+            table.insert(current_file_lines, line)
+        end
+    end
+
+    -- Finalize the last file
+    finalize_current_file()
+
+    return result
+end
+
+--- @param diff string the diff for a file (starting from first @@ hunk header)
+--- @return FileDiffData
+M.get_diff_data_file = function(diff)
+    local lines = vim.split(diff, '\n', { plain = true })
+
+    --- @type FileDiffData
+    local file_data = {
+        hunks = {},
+        old_path = nil,
+        new_path = nil
+    }
+
+    local current_hunk = nil
+    local old_line_num = 0  -- Track line number in old file
+    local new_line_num = 0  -- Track line number in new file
+    local diff_line_num = 0 -- Track line number in diff output
+
+    for _, line in ipairs(lines) do
+        diff_line_num = diff_line_num + 1
+
+        -- Hunk header: @@ -old_start,old_count +new_start,new_count @@
+        if line:match('^@@') then
+            local old_info, new_info = line:match('^@@[%s]+%-([^%s]+)[%s]+%+([^%s]+)[%s]+@@')
+
+            if old_info and new_info then
+                local old_start_str, old_count_str = old_info:match('(%d+),?(%d*)')
+                local new_start_str, new_count_str = new_info:match('(%d+),?(%d*)')
+
+                local old_start = tonumber(old_start_str) or 1
+                local old_count = tonumber(old_count_str) or 1
+                local new_start = tonumber(new_start_str) or 1
+                local new_count = tonumber(new_count_str) or 1
+
+                -- Initialize new hunk
+                current_hunk = {
+                    lines = {},
+                    old_start = old_start,
+                    old_count = old_count,
+                    new_start = new_start,
+                    new_count = new_count,
+                    header = line
+                }
+
+                -- Reset line counters for this hunk
+                old_line_num = old_start
+                new_line_num = new_start
+
+                table.insert(file_data.hunks, current_hunk)
+            end
+
+            -- Added line
+        elseif line:match('^%+') and current_hunk then
+            local content = line:sub(2) -- Remove '+' prefix
+
+            table.insert(current_hunk.lines, {
+                content = content,
+                old_line_num = nil, -- No old line (this is added)
+                new_line_num = new_line_num,
+                diff_line_num = diff_line_num,
+                formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
+                line_type = "added"
+            })
+
+            new_line_num = new_line_num + 1
+
+            -- Removed line
+        elseif line:match('^%-') and current_hunk then
+            local content = line:sub(2) -- Remove '-' prefix
+
+            table.insert(current_hunk.lines, {
+                content = content,
+                old_line_num = old_line_num,
+                new_line_num = nil,                      -- No new line (this is removed)
+                diff_line_num = diff_line_num,
+                formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
+                line_type = "removed"
+            })
+
+            old_line_num = old_line_num + 1
+
+            -- Context line (starts with space or is plain text in hunk)
+        elseif current_hunk and line:match('^%s') then
+            local content = line:sub(2) -- Remove leading space
+
+            table.insert(current_hunk.lines, {
+                content = content,
+                old_line_num = old_line_num,
+                new_line_num = new_line_num,
+                diff_line_num = diff_line_num,
+                formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
+                line_type = "context"
+            })
+
+            old_line_num = old_line_num + 1
+            new_line_num = new_line_num + 1
+        end
+        -- Skip other lines
+    end
+
+    return file_data
+end
+
+--- @param diff_data DirectoryDiffData
+--- @return number buf_id
+M.create_formatted_buffer = function(diff_data)
+    -- Create buffer with proper options
+    local diff_bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
+    vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
+
+    local output_lines = {}
+    local current_line_num = 0 -- Track current line number in formatted buffer (0-indexed)
+
+    -- Process each file
+    for filename, file_data in pairs(diff_data.files) do
+        -- Add file header (just the new filename)
+        table.insert(output_lines, filename)
+        current_line_num = current_line_num + 1
+
+        table.insert(output_lines, "") -- Blank line after filename
+        current_line_num = current_line_num + 1
+
+        -- Process each hunk in the file
+        for _, hunk in ipairs(file_data.hunks) do
+            -- Add hunk header with new line number
+            local hunk_header = string.format("Line %d", hunk.new_start)
+            table.insert(output_lines, hunk_header)
+            current_line_num = current_line_num + 1
+
+            -- Process each line in the hunk
+            for _, line in ipairs(hunk.lines) do
+                -- Add content without +/- prefixes (already removed in parsing)
+                table.insert(output_lines, line.content)
+
+                -- Update formatted_diff_line_num to track position in formatted buffer
+                line.formatted_diff_line_num = current_line_num
+                current_line_num = current_line_num + 1
+            end
+
+            table.insert(output_lines, "") -- Blank line after hunk
+            current_line_num = current_line_num + 1
+        end
+    end
+
+    -- Set buffer content (temporarily make it modifiable)
+    vim.api.nvim_set_option_value('modifiable', true, { buf = diff_bufnr })
+    vim.api.nvim_buf_set_lines(diff_bufnr, 0, -1, false, output_lines)
+    --vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
+
+    return diff_bufnr
+end
+
+--- @param diff_data DirectoryDiffData
+--- @param diff_buf_id number id of buffer with the diffed contents
+M.highlight_git_diff = function(diff_data, diff_buf_id)
+    -- Find git root directory
+    local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
+    if vim.v.shell_error ~= 0 then
+        vim.notify("Not in a git repository", vim.log.levels.WARN)
+        return
+    end
+
+    -- Iterate through each file and apply highlighting
+    for filename, file_data in pairs(diff_data.files) do
+        -- Construct full path to source file
+        local source_path = git_root .. '/' .. filename
+
+        -- Check if file exists
+        if vim.fn.filereadable(source_path) == 0 then
+            vim.notify("File not found: " .. source_path, vim.log.levels.WARN)
+            goto continue
+        end
+
+        -- Open file in a hidden buffer
+        local source_buf_id = vim.fn.bufadd(source_path)
+        local was_loaded = vim.api.nvim_buf_is_loaded(source_buf_id)
+        vim.fn.bufload(source_buf_id)
+
+        -- Set filetype to trigger syntax highlighting
+        local filetype = vim.filetype.match({ buf = source_buf_id, filename = source_path })
+        if filetype then
+            vim.api.nvim_set_option_value("filetype", filetype, { buf = source_buf_id })
+        end
+
+        -- Apply highlighting for this file
+        M.highlight_diff_file(file_data, diff_buf_id, source_buf_id)
+
+        ::continue::
+    end
+end
+
+--- @param file_data FileDiffData
+--- @param diff_buf_id number
+--- @param source_buf_id number
+M.highlight_diff_file = function(file_data, diff_buf_id, source_buf_id)
+    if not vim.api.nvim_buf_is_valid(source_buf_id) or not vim.api.nvim_buf_is_valid(diff_buf_id) then
+        return
+    end
+
+    -- Create line mapping for added lines
+    local line_map = {} -- Maps source line number to target line number
+    for _, hunk in ipairs(file_data.hunks) do
+        for _, line in ipairs(hunk.lines) do
+            if line.line_type == "added" and line.new_line_num then
+                line_map[line.new_line_num] = line.formatted_diff_line_num
+            end
+        end
+    end
+
+    -- Set up highlighting copy (will handle both immediate and async cases)
+    setup_highlight_copy(source_buf_id, diff_buf_id, line_map)
+end
+
+return M
+
+--- @class DiffLine
+--- @field content string The line content
+--- @field old_line_num number|nil Line number in old file (nil if added)
+--- @field new_line_num number|nil Line number in new file (nil if removed)
+--- @field diff_line_num number Line number in the diff output
+--- @field formatted_diff_line_num number Line number in the diff output; if formatting is applied to the buffer, this field is updated, while diff_line_num remains the same
+--- @field line_type "added"|"removed"|"context" Type of change
+
+--- @class Hunk
+--- @field lines DiffLine[] Array of lines in this hunk
+--- @field old_start number Starting line number in old file
+--- @field old_count number Number of lines in old file
+--- @field new_start number Starting line number in new file
+--- @field new_count number Number of lines in new file
+--- @field header string The hunk header line (e.g., "@@ -10,5 +12,6 @@")
+
+--- @class FileDiffData
+--- @field hunks Hunk[] Array of hunks for this file
+--- @field old_path string|nil Path to old file (from --- a/...)
+--- @field new_path string|nil Path to new file (from +++ b/...)
+
+--- A key-value table where key is the filename, and the value is FileData
+--- @class DirectoryDiffData
+--- @field files table<string, FileDiffData> Map of filename to file diff data
