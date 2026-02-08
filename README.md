@@ -2,15 +2,13 @@
 
 # Requirements
 ### Core functionality
-Given a diff, output a readonly neovim buffer with diff two tier highlighting, while maintaining the original highlighting from treesitter and lsp
-the two tier highlighting and the formatting of hunk headers and such should equal the original delta pager
+Given a diff, output a readonly neovim buffer with diff two tier highlighting, using treesitter and (if possible) lsp highlighting. formatting of hunk headers and such should equal the original delta pager, or at least be close; wiggle room is available for technical constraints
 
 ### diffing algorithm stuff
 if using for git, use git diff; else, use vim.text.diff. Use myers algorthm for vim.text.diff, and linematch must be off. consider explicitly setting those for git as well
 if we want consistency, we could use vim.text.diff for git as well, and just use git to get the files and the indexes and stuff. Seems like git diff is able to diff directories, while vim.text.diff cannot. But this can easily be spun up if we can get what files we need to diff.
 
 ### syntax highlighting
-currently the approach is to disable treesitter on the scratch buffer and apply the exact highlighting via extmarks that is on the source buffer onto the new buffer. This avoids the tradeoff of having bad highlighting on context that is incomplete (for example, the start of a function without the end) that is noted in another plugin diffs.nvim that tries to do a similar thing of treesitter highlighting in a unified diff file. However, this may come with the tradeoff of lsp may not work without treesitter active and parsing; if I am hard coding the rerouting by column and row indexes though, this may not be an issue.
 
 ### integrations
 currently Deltaview.nvim uses the delta binary; this should be a drop in substitute, with slight differences in cursor tracking (due to line number and not having to parse them anymore, and instead we can use the buffer itself)

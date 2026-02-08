@@ -1,18 +1,5 @@
 local M = {}
-
----Check if Treesitter is attached to a buffer
----@param bufnr number
----@return boolean
-local function is_treesitter_attached(bufnr)
-    -- Check if treesitter is available
-    local has_ts, ts_highlighter = pcall(require, "vim.treesitter.highlighter")
-    if not has_ts then
-        return false
-    end
-
-    -- Check if buffer has an active treesitter highlighter
-    return ts_highlighter.active[bufnr] ~= nil
-end
+local utils = require('delta.utils')
 
 -- helper for test troubleshooting: Recursively print keys and values of a table
 local function print_table(tbl, indent)
@@ -35,15 +22,12 @@ end
 ---@param line_map table<number, number> Maps source line numbers to target line numbers
 ---@return number count Number of extmarks copied
 local function copy_highlighting(source_buf, target_buf, line_map)
-    -- Validate buffers
     if not vim.api.nvim_buf_is_valid(source_buf) or not vim.api.nvim_buf_is_valid(target_buf) then
         return 0
     end
 
-    -- Get all namespaces
     local namespaces = vim.api.nvim_get_namespaces()
 
-    -- Collect all extmarks from all namespaces
     local all_marks = {}
     for name, ns_id in pairs(namespaces) do
         local ok, marks = pcall(vim.api.nvim_buf_get_extmarks, source_buf, ns_id, 0, -1, { details = true })
@@ -56,26 +40,49 @@ local function copy_highlighting(source_buf, target_buf, line_map)
 
     print(string.format("[Delta] Found %d extmarks in source buffer %d", #all_marks, source_buf))
 
+    -- Debug: Print some sample lines from the source buffer to verify content
+    print("[Delta] Sample lines from source buffer:")
+    for src_line, tgt_line in pairs(line_map) do
+        local ok, line_content = pcall(vim.api.nvim_buf_get_lines, source_buf, src_line - 1, src_line, false)
+        if ok and line_content[1] then
+            print(string.format("  Line %d: %s", src_line, line_content[1]))
+        end
+    end
+
+    -- Debug: Show sample of extmarks we found
+    print("[Delta] extmarks:")
+    --print_table(all_marks)
+
     -- Create a namespace for our highlighting
     local ns_id = vim.api.nvim_create_namespace("delta_highlight")
 
     local copied_count = 0
     for _, mark in ipairs(all_marks) do
-        local line = mark[2]
-        local col = mark[3]
+        local line = mark[2] -- Don't convert, already a number
+        local col = mark[3]  -- Don't convert, already a number
         local details = mark[4]
 
         -- Check if this line is in our mapping
         local target_line = line_map[line + 1] -- +1 because extmarks are 0-indexed, our map is 1-indexed
+
+        --print('line: ' .. line)
+        --print('end_row: ' .. details.end_row)
+
+        if details.hl_group ~= nil then
+            print_table(mark)
+        end
+
         if target_line and details.hl_group then
             -- Copy the extmark to the target buffer
-            local ok = pcall(vim.api.nvim_buf_set_extmark, target_buf, ns_id, target_line - 1, col, {
+            local ok, err = pcall(vim.api.nvim_buf_set_extmark, target_buf, ns_id, target_line - 1, col, {
                 end_line = details.end_row,
                 end_col = details.end_col,
                 hl_group = details.hl_group,
             })
             if ok then
                 copied_count = copied_count + 1
+            else
+                print(string.format("[Delta] Failed to copy extmark from line %d: %s", line, tostring(err)))
             end
         end
     end
@@ -83,46 +90,6 @@ local function copy_highlighting(source_buf, target_buf, line_map)
     print(string.format("[Delta] Copied %d extmarks to target buffer %d", copied_count, target_buf))
     return copied_count
 end
-
----Set up highlighting copy with Treesitter event handling
----@param source_buf number
----@param target_buf number
----@param line_map table<number, number>
-local function setup_highlight_copy(source_buf, target_buf, line_map)
-    -- If Treesitter is already attached, copy immediately
-    if is_treesitter_attached(source_buf) then
-        print(string.format("[Delta] Treesitter already attached to buffer %d, copying highlights immediately",
-            source_buf))
-        vim.schedule(function()
-            copy_highlighting(source_buf, target_buf, line_map)
-        end)
-        return
-    end
-
-    print(string.format("[Delta] Treesitter not yet attached to buffer %d, setting up event listener", source_buf))
-
-    -- Set up autocmd to listen for Treesitter attachment
-    -- We listen for FileType event which triggers after syntax/treesitter loads
-    local augroup = vim.api.nvim_create_augroup("DeltaHighlightCopy_" .. source_buf, { clear = true })
-
-    vim.api.nvim_create_autocmd({ "FileType", "Syntax" }, {
-        group = augroup,
-        buffer = source_buf,
-        once = true, -- Only trigger once
-        callback = function()
-            -- Small delay to ensure Treesitter has actually attached
-            vim.defer_fn(function()
-                if is_treesitter_attached(source_buf) then
-                    print(string.format("[Delta] Treesitter attached to buffer %d, copying highlights", source_buf))
-                    copy_highlighting(source_buf, target_buf, line_map)
-                    -- Clean up the autocmd group
-                    pcall(vim.api.nvim_del_augroup_by_id, augroup)
-                end
-            end, 100)
-        end,
-    })
-end
-
 
 --- if git, do the appropriate logic to use that command and use that logic
 --- if normal, use vim.text.diff stuff
@@ -154,7 +121,10 @@ M.git_diff = function(ref, path)
     local data = M.get_diff_data_directory(diffstring)
     --print_table(data)
     local buf_id = M.create_formatted_buffer(data)
-    M.highlight_git_diff(data, buf_id)
+    --M.highlight_git_diff(data, buf_id)
+    vim.api.nvim_create_user_command('ManualHighlight', function()
+        M.highlight(buf_id)
+    end, { desc = "Run delta diff on current buffer" })
 
     vim.cmd('vsplit')
     vim.api.nvim_win_set_buf(0, buf_id)
@@ -342,6 +312,7 @@ M.create_formatted_buffer = function(diff_data)
     local diff_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
     vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
+    vim.api.nvim_set_option_value('filetype', 'markdown', { buf = diff_bufnr })
 
     local output_lines = {}
     local current_line_num = 0 -- Track current line number in formatted buffer (0-indexed)
@@ -355,11 +326,17 @@ M.create_formatted_buffer = function(diff_data)
         table.insert(output_lines, "") -- Blank line after filename
         current_line_num = current_line_num + 1
 
+        -- Get language for code fence based on file extension
+        local lang = utils.get_language_from_filename(filename)
+
         -- Process each hunk in the file
         for _, hunk in ipairs(file_data.hunks) do
             -- Add hunk header with new line number
             local hunk_header = string.format("Line %d", hunk.new_start)
             table.insert(output_lines, hunk_header)
+            current_line_num = current_line_num + 1
+
+            table.insert(output_lines, '```' .. lang)
             current_line_num = current_line_num + 1
 
             -- Process each line in the hunk
@@ -372,6 +349,9 @@ M.create_formatted_buffer = function(diff_data)
                 current_line_num = current_line_num + 1
             end
 
+            table.insert(output_lines, '```')
+            current_line_num = current_line_num + 1
+
             table.insert(output_lines, "") -- Blank line after hunk
             current_line_num = current_line_num + 1
         end
@@ -383,6 +363,33 @@ M.create_formatted_buffer = function(diff_data)
     --vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
 
     return diff_bufnr
+end
+
+M.highlight = function(diff_buf_id)
+    local marks = vim.api.nvim_buf_get_extmarks(
+        diff_buf_id,
+        -1, -- all namespaces
+        { 0, 0 },
+        { -1, -1 },
+        { details = true }
+    )
+
+    -- Detach treesitter from the buffer to prevent conflicts with manual highlighting
+    pcall(vim.treesitter.stop, diff_buf_id)
+
+    local unpack = unpack or table.unpack
+    local ns = vim.api.nvim_create_namespace('diff_display')
+    for _, extmark in ipairs(marks) do
+        local id, row, col, details = unpack(extmark)
+        -- Adjust row/col for diff buffer position + prefix offset
+        vim.api.nvim_buf_set_extmark(diff_buf_id, ns, row, col, {
+            end_row = details.end_row,
+            end_col = details.end_col,
+            hl_group = details.hl_group,
+            -- ... other properties
+        })
+    end
+    print_table(marks)
 end
 
 --- @param diff_data DirectoryDiffData
@@ -412,10 +419,10 @@ M.highlight_git_diff = function(diff_data, diff_buf_id)
         vim.fn.bufload(source_buf_id)
 
         -- Set filetype to trigger syntax highlighting
-        local filetype = vim.filetype.match({ buf = source_buf_id, filename = source_path })
-        if filetype then
-            vim.api.nvim_set_option_value("filetype", filetype, { buf = source_buf_id })
-        end
+        --local filetype = vim.filetype.match({ buf = source_buf_id, filename = source_path })
+        --if filetype then
+        --    vim.api.nvim_set_option_value("filetype", filetype, { buf = source_buf_id })
+        --end
 
         -- Apply highlighting for this file
         M.highlight_diff_file(file_data, diff_buf_id, source_buf_id)
@@ -423,6 +430,7 @@ M.highlight_git_diff = function(diff_data, diff_buf_id)
         ::continue::
     end
 end
+
 
 --- @param file_data FileDiffData
 --- @param diff_buf_id number
@@ -433,18 +441,61 @@ M.highlight_diff_file = function(file_data, diff_buf_id, source_buf_id)
     end
 
     -- Create line mapping for added lines
+    --local line_map = {} -- Maps source line number to target line number
+    --for _, hunk in ipairs(file_data.hunks) do
+    --    for _, line in ipairs(hunk.lines) do
+    --        if line.new_line_num then
+    --            line_map[line.new_line_num] = line.formatted_diff_line_num
+    --        end
+    --    end
+    --end
+
     local line_map = {} -- Maps source line number to target line number
     for _, hunk in ipairs(file_data.hunks) do
         for _, line in ipairs(hunk.lines) do
-            if line.line_type == "added" and line.new_line_num then
-                line_map[line.new_line_num] = line.formatted_diff_line_num
+            if line.new_line_num then
+                line_map[line.formatted_diff_line_num] = line.new_line_num
             end
         end
     end
 
-    -- Set up highlighting copy (will handle both immediate and async cases)
-    setup_highlight_copy(source_buf_id, diff_buf_id, line_map)
+    -- Mapping: display_line -> {buf = before_buf, line = 5}
+    local ns = vim.api.nvim_create_namespace('diff_display')
+    local unpack = unpack or table.unpack
+    vim.api.nvim_set_decoration_provider(ns, {
+        on_win = function(_, winid, bufnr, topline, botline)
+            if bufnr ~= diff_buf_id then return false end
+
+            for display_line = topline, botline do
+                local source = line_map[display_line]
+                if source then
+                    -- Get highlights from the source buffer at the source line
+                    local marks = vim.api.nvim_buf_get_extmarks(
+                        source_buf_id,
+                        -1, -- all namespaces
+                        { 0, 0 },
+                        { -1, -1 },
+                        { details = true }
+                    )
+                    print_table(marks)
+
+                    -- Apply them to the display buffer
+                    for _, mark in ipairs(marks) do
+                        local _, _, _, opts = unpack(mark)
+                        if opts.hl_group then
+                            vim.api.nvim_buf_set_extmark(bufnr, ns, display_line, opts.end_col or 0, {
+                                end_col = opts.end_col,
+                                hl_group = opts.hl_group,
+                                ephemeral = true, -- key: these are temporary per redraw
+                            })
+                        end
+                    end
+                end
+            end
+        end,
+    })
 end
+
 
 return M
 
