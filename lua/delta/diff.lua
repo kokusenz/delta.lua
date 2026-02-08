@@ -1,96 +1,6 @@
 local M = {}
 local utils = require('delta.utils')
 
--- helper for test troubleshooting: Recursively print keys and values of a table
-local function print_table(tbl, indent)
-    indent = indent or 0
-    local space = string.rep("  ", indent)
-
-    for key, value in pairs(tbl) do
-        if type(value) == "table" then
-            print(space .. tostring(key) .. ":")
-            print_table(value, indent + 1)
-        else
-            print(space .. tostring(key) .. ": " .. tostring(value))
-        end
-    end
-end
-
----Copy highlighting from source buffer to target buffer using line mapping
----@param source_buf number
----@param target_buf number
----@param line_map table<number, number> Maps source line numbers to target line numbers
----@return number count Number of extmarks copied
-local function copy_highlighting(source_buf, target_buf, line_map)
-    if not vim.api.nvim_buf_is_valid(source_buf) or not vim.api.nvim_buf_is_valid(target_buf) then
-        return 0
-    end
-
-    local namespaces = vim.api.nvim_get_namespaces()
-
-    local all_marks = {}
-    for name, ns_id in pairs(namespaces) do
-        local ok, marks = pcall(vim.api.nvim_buf_get_extmarks, source_buf, ns_id, 0, -1, { details = true })
-        if ok and marks then
-            for _, mark in ipairs(marks) do
-                table.insert(all_marks, mark)
-            end
-        end
-    end
-
-    print(string.format("[Delta] Found %d extmarks in source buffer %d", #all_marks, source_buf))
-
-    -- Debug: Print some sample lines from the source buffer to verify content
-    print("[Delta] Sample lines from source buffer:")
-    for src_line, tgt_line in pairs(line_map) do
-        local ok, line_content = pcall(vim.api.nvim_buf_get_lines, source_buf, src_line - 1, src_line, false)
-        if ok and line_content[1] then
-            print(string.format("  Line %d: %s", src_line, line_content[1]))
-        end
-    end
-
-    -- Debug: Show sample of extmarks we found
-    print("[Delta] extmarks:")
-    --print_table(all_marks)
-
-    -- Create a namespace for our highlighting
-    local ns_id = vim.api.nvim_create_namespace("delta_highlight")
-
-    local copied_count = 0
-    for _, mark in ipairs(all_marks) do
-        local line = mark[2] -- Don't convert, already a number
-        local col = mark[3]  -- Don't convert, already a number
-        local details = mark[4]
-
-        -- Check if this line is in our mapping
-        local target_line = line_map[line + 1] -- +1 because extmarks are 0-indexed, our map is 1-indexed
-
-        --print('line: ' .. line)
-        --print('end_row: ' .. details.end_row)
-
-        if details.hl_group ~= nil then
-            print_table(mark)
-        end
-
-        if target_line and details.hl_group then
-            -- Copy the extmark to the target buffer
-            local ok, err = pcall(vim.api.nvim_buf_set_extmark, target_buf, ns_id, target_line - 1, col, {
-                end_line = details.end_row,
-                end_col = details.end_col,
-                hl_group = details.hl_group,
-            })
-            if ok then
-                copied_count = copied_count + 1
-            else
-                print(string.format("[Delta] Failed to copy extmark from line %d: %s", line, tostring(err)))
-            end
-        end
-    end
-
-    print(string.format("[Delta] Copied %d extmarks to target buffer %d", copied_count, target_buf))
-    return copied_count
-end
-
 --- if git, do the appropriate logic to use that command and use that logic
 --- if normal, use vim.text.diff stuff
 --- @param ref string
@@ -121,6 +31,7 @@ M.git_diff = function(ref, path)
     local data = M.get_diff_data_directory(diffstring)
     --print_table(data)
     local buf_id = M.create_formatted_buffer(data)
+    vim.treesitter.start(buf_id)
     --M.highlight_git_diff(data, buf_id)
     vim.api.nvim_create_user_command('ManualHighlight', function()
         M.highlight(buf_id)
@@ -365,31 +276,19 @@ M.create_formatted_buffer = function(diff_data)
     return diff_bufnr
 end
 
-M.highlight = function(diff_buf_id)
-    local marks = vim.api.nvim_buf_get_extmarks(
-        diff_buf_id,
-        -1, -- all namespaces
-        { 0, 0 },
-        { -1, -1 },
-        { details = true }
-    )
-
-    -- Detach treesitter from the buffer to prevent conflicts with manual highlighting
-    pcall(vim.treesitter.stop, diff_buf_id)
-
-    local unpack = unpack or table.unpack
-    local ns = vim.api.nvim_create_namespace('diff_display')
-    for _, extmark in ipairs(marks) do
-        local id, row, col, details = unpack(extmark)
-        -- Adjust row/col for diff buffer position + prefix offset
-        vim.api.nvim_buf_set_extmark(diff_buf_id, ns, row, col, {
-            end_row = details.end_row,
-            end_col = details.end_col,
-            hl_group = details.hl_group,
-            -- ... other properties
-        })
-    end
-    print_table(marks)
+M.highlight = function(bufnr)
+    local highlights = utils.capture_highlights(bufnr)
+    pcall(vim.treesitter.stop, bufnr)
+    --utils.freeze_all_highlights(bufnr)
+    utils.reapply_highlights(bufnr, highlights)
+    --local after_highlights = utils.capture_highlights(bufnr)
+    --local differences = utils.deep_compare(after_highlights, highlights)
+    --if differences then
+    --    print("[Delta] Highlight differences detected:")
+    --    utils.print_table(differences)
+    --else
+    --    print("[Delta] No differences - highlights match perfectly!")
+    --end
 end
 
 --- @param diff_data DirectoryDiffData
@@ -477,7 +376,7 @@ M.highlight_diff_file = function(file_data, diff_buf_id, source_buf_id)
                         { -1, -1 },
                         { details = true }
                     )
-                    print_table(marks)
+                    M.print_table(marks)
 
                     -- Apply them to the display buffer
                     for _, mark in ipairs(marks) do
