@@ -1,5 +1,24 @@
 local M = {}
 
+
+M.is_metadata_pattern = function(str)
+    local METADATA_PATTERNS = {
+        "^spell",      -- @spell.lua, @spell
+        "^nospell",    -- @nospell.lua
+        "^conceal",    -- @conceal
+        "^definition", -- @definition (for LSP navigation)
+        "^scope",      -- @scope (for scope detection)
+        "^scope",      -- @scope (for scope detection)
+    }
+
+    for _, pattern in ipairs(METADATA_PATTERNS) do
+        if str:match(pattern) then
+            return true
+        end
+    end
+    return false
+end
+
 -- helper for test troubleshooting: Recursively print keys and values of a table
 M.print_table = function(tbl, indent)
     indent = indent or 0
@@ -47,15 +66,19 @@ M.reapply_highlights = function(bufnr, highlights)
     for line_number, highlight in pairs(highlights) do
         -- Apply each captured highlight
         for _, hl in ipairs(highlight) do
-            --vim.api.nvim_buf_set_extmark()
-            vim.api.nvim_buf_add_highlight(
-                bufnr,
-                ns_id,
-                hl.hl_group,
-                line_number,
-                hl.col,
-                hl.end_col
-            )
+            vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number-1, hl.col, {
+                end_col = hl.end_col,
+                hl_group = hl.hl_group,
+                priority = 101
+            })
+            --vim.api.nvim_buf_add_highlight(
+            --    bufnr,
+            --    ns_id,
+            --    hl.hl_group,
+            --    line_number,
+            --    hl.col,
+            --    hl.end_col
+            --)
         end
     end
     return ns_id
@@ -75,13 +98,19 @@ M.capture_highlights = function(bufnr)
         local start_col = nil
 
         for col = 0, #line_content do
-            local pos_data = vim.inspect_pos(bufnr, line_number, col)
+            local pos_data = vim.inspect_pos(bufnr, line_number - 1, col)
             local current_group = nil
 
             -- Get treesitter highlight at this position
             if pos_data.treesitter and #pos_data.treesitter > 0 then
-                -- Get the most specific capture (last one)
-                current_group = pos_data.treesitter[#pos_data.treesitter].capture
+                -- Get the most specific capture (last one that is not a metadata pattern)
+                for i = #pos_data.treesitter, 1, -1 do
+                    local group = pos_data.treesitter[i]
+                    if not M.is_metadata_pattern(group.capture) then
+                        current_group = group.hl_group
+                        break
+                    end
+                end
             end
 
             -- Detect highlight changes
@@ -90,7 +119,7 @@ M.capture_highlights = function(bufnr)
                     table.insert(highlights, {
                         col = start_col,
                         end_col = col,
-                        hl_group = "@" .. prev_group -- Treesitter captures are prefixed with @
+                        hl_group = prev_group
                     })
                 end
                 start_col = col
@@ -99,8 +128,17 @@ M.capture_highlights = function(bufnr)
         end
         line_highlights[line_number] = highlights
     end
-    M.print_table(line_highlights)
     return line_highlights
+end
+
+M.freeze_and_isolate_highlights = function(bufnr)
+    -- 2. Stop treesitter
+    vim.treesitter.stop(bufnr)
+
+    -- 3. ALSO disable traditional syntax highlighting
+    vim.api.nvim_buf_call(bufnr, function()
+        vim.cmd('syntax off')
+    end)
 end
 
 --- Helper function to determine language identifier from file extension

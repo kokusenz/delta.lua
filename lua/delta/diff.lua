@@ -181,18 +181,18 @@ M.get_diff_data_file = function(diff)
 
             -- Removed line
         elseif line:match('^%-') and current_hunk then
-            local content = line:sub(2) -- Remove '-' prefix
+            --local content = line:sub(2) -- Remove '-' prefix
 
-            table.insert(current_hunk.lines, {
-                content = content,
-                old_line_num = old_line_num,
-                new_line_num = nil,                      -- No new line (this is removed)
-                diff_line_num = diff_line_num,
-                formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
-                line_type = "removed"
-            })
+            --table.insert(current_hunk.lines, {
+            --    content = content,
+            --    old_line_num = old_line_num,
+            --    new_line_num = nil,                      -- No new line (this is removed)
+            --    diff_line_num = diff_line_num,
+            --    formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
+            --    line_type = "removed"
+            --})
 
-            old_line_num = old_line_num + 1
+            --old_line_num = old_line_num + 1
 
             -- Context line (starts with space or is plain text in hunk)
         elseif current_hunk and line:match('^%s') then
@@ -278,9 +278,10 @@ end
 
 M.highlight = function(bufnr)
     local highlights = utils.capture_highlights(bufnr)
-    pcall(vim.treesitter.stop, bufnr)
-    --utils.freeze_all_highlights(bufnr)
+    --pcall(vim.treesitter.stop, bufnr)
+    utils.freeze_and_isolate_highlights(bufnr)
     utils.reapply_highlights(bufnr, highlights)
+    --pcall(vim.treesitter.stop, bufnr)
     --local after_highlights = utils.capture_highlights(bufnr)
     --local differences = utils.deep_compare(after_highlights, highlights)
     --if differences then
