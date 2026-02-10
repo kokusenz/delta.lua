@@ -1,89 +1,7 @@
 local M = {}
 
-
-M.is_metadata_pattern = function(str)
-    local METADATA_PATTERNS = {
-        "^spell",      -- @spell.lua, @spell
-        "^nospell",    -- @nospell.lua
-        "^conceal",    -- @conceal
-        "^definition", -- @definition (for LSP navigation)
-        "^scope",      -- @scope (for scope detection)
-        "^scope",      -- @scope (for scope detection)
-    }
-
-    for _, pattern in ipairs(METADATA_PATTERNS) do
-        if str:match(pattern) then
-            return true
-        end
-    end
-    return false
-end
-
--- helper for test troubleshooting: Recursively print keys and values of a table
-M.print_table = function(tbl, indent)
-    indent = indent or 0
-    local space = string.rep("  ", indent)
-
-    for key, value in pairs(tbl) do
-        if type(value) == "table" then
-            print(space .. tostring(key) .. ":")
-            M.print_table(value, indent + 1)
-        else
-            print(space .. tostring(key) .. ": " .. tostring(value))
-        end
-    end
-end
-
--- Function to reapply captured highlights
---M.reapply_highlights = function(bufnr, line_number, highlights)
---    -- Create a namespace for our manual highlights
---    local ns_id = vim.api.nvim_create_namespace("frozen_treesitter_highlights")
---
---    -- Clear any existing highlights on this line
---    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, line_number, line_number + 1)
---
---    -- Apply each captured highlight
---    for _, hl in ipairs(highlights) do
---        vim.api.nvim_buf_add_highlight(
---            bufnr,
---            ns_id,
---            hl.hl_group,
---            line_number,
---            hl.col,
---            hl.end_col
---        )
---    end
---
---    return ns_id
---end
-
--- Function to reapply captured highlights
-M.reapply_highlights = function(bufnr, highlights)
-    -- Create a namespace for our manual highlights
-    local ns_id = vim.api.nvim_create_namespace("frozen_treesitter_highlights")
-    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
-
-    for line_number, highlight in pairs(highlights) do
-        -- Apply each captured highlight
-        for _, hl in ipairs(highlight) do
-            vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number-1, hl.col, {
-                end_col = hl.end_col,
-                hl_group = hl.hl_group,
-                priority = 101
-            })
-            --vim.api.nvim_buf_add_highlight(
-            --    bufnr,
-            --    ns_id,
-            --    hl.hl_group,
-            --    line_number,
-            --    hl.col,
-            --    hl.end_col
-            --)
-        end
-    end
-    return ns_id
-end
-
+--- @param bufnr number
+--- @return table<number, LineHighlight>
 M.capture_highlights = function(bufnr)
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     local line_highlights = {}
@@ -93,7 +11,6 @@ M.capture_highlights = function(bufnr)
             return highlights
         end
 
-        -- Sample each position on the line
         local prev_group = nil
         local start_col = nil
 
@@ -101,9 +18,8 @@ M.capture_highlights = function(bufnr)
             local pos_data = vim.inspect_pos(bufnr, line_number - 1, col)
             local current_group = nil
 
-            -- Get treesitter highlight at this position
             if pos_data.treesitter and #pos_data.treesitter > 0 then
-                -- Get the most specific capture (last one that is not a metadata pattern)
+                -- get the most specific capture (last one that is not a metadata pattern)
                 for i = #pos_data.treesitter, 1, -1 do
                     local group = pos_data.treesitter[i]
                     if not M.is_metadata_pattern(group.capture) then
@@ -113,7 +29,6 @@ M.capture_highlights = function(bufnr)
                 end
             end
 
-            -- Detect highlight changes
             if current_group ~= prev_group then
                 if prev_group and start_col then
                     table.insert(highlights, {
@@ -131,14 +46,54 @@ M.capture_highlights = function(bufnr)
     return line_highlights
 end
 
+--- @param bufnr number
+--- @param highlights table<number, LineHighlight>
+M.reapply_highlights = function(bufnr, highlights)
+    local ns_id = vim.api.nvim_create_namespace("frozen_treesitter_highlights")
+    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
+    for line_number, highlight in pairs(highlights) do
+        for _, hl in ipairs(highlight) do
+            vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number - 1, hl.col, {
+                end_col = hl.end_col,
+                hl_group = hl.hl_group,
+                priority = 101
+            })
+        end
+    end
+    return ns_id
+end
+
+--- @param bufnr number
 M.freeze_and_isolate_highlights = function(bufnr)
-    -- 2. Stop treesitter
     vim.treesitter.stop(bufnr)
 
-    -- 3. ALSO disable traditional syntax highlighting
+    -- disabling traditional syntax highlighting
     vim.api.nvim_buf_call(bufnr, function()
         vim.cmd('syntax off')
     end)
+end
+
+--- @param bufnr number
+--- @param callbacks table<function>
+M.on_treesitter_parse_complete = function(bufnr, callbacks)
+    local parser = vim.treesitter.get_parser(bufnr)
+
+    -- TODO register cbs fires when the lua markdown fences have finished being parsed, but before the actual code inside the fences are parsed
+    -- we need to fire a waiter until the last valid line of code (iterate from the bottom until the first triple backticks are hit) has a highlight
+    -- do a poller that runs ever 100 and stops when the line above the last triple backtick has a highlight.
+    -- edge case: if the last hunk looks like ```lua\n``` such that there is nothing to be highlighted
+    -- if there is text/characters AND no highlights exist, continue polling
+    parser:register_cbs({
+        on_changedtree = function()
+            vim.schedule(function()
+                print("Treesitter parsed! Tree changed.")
+                for _, fn in ipairs(callbacks) do
+                    fn()
+                end
+            end)
+        end
+    })
 end
 
 --- Helper function to determine language identifier from file extension
@@ -147,10 +102,10 @@ end
 M.get_language_from_filename = function(filename)
     local extension = filename:match("%.([^%.]+)$")
     if not extension then
-        return "" -- No extension, use plain code block
+        return ""
     end
 
-    -- Map common extensions to markdown language identifiers
+    -- map common extensions to markdown language identifiers
     local ext_to_lang = {
         lua = "lua",
         py = "python",
@@ -203,55 +158,44 @@ M.get_language_from_filename = function(filename)
     return ext_to_lang[extension] or extension
 end
 
---- Recursively compare two tables and return differences
---- @param t1 table First table
---- @param t2 table Second table
---- @param path string|nil Current path for nested keys (for reporting)
---- @return table|nil Differences found, or nil if tables are equal
-M.deep_compare = function(t1, t2, path)
-    path = path or "root"
-    local differences = {}
+--- @param str string
+M.is_metadata_pattern = function(str)
+    local METADATA_PATTERNS = {
+        "^spell",      -- @spell.lua, @spell
+        "^nospell",    -- @nospell.lua
+        "^conceal",    -- @conceal
+        "^definition", -- @definition (for LSP navigation)
+        "^scope",      -- @scope (for scope detection)
+        "^scope",      -- @scope (for scope detection)
+    }
 
-    -- Check if both are tables
-    if type(t1) ~= "table" or type(t2) ~= "table" then
-        if t1 ~= t2 then
-            return { path = path, t1 = t1, t2 = t2 }
-        end
-        return nil
-    end
-
-    -- Check all keys in t1
-    for k, v1 in pairs(t1) do
-        local v2 = t2[k]
-        local key_path = path .. "." .. tostring(k)
-
-        if type(v1) == "table" and type(v2) == "table" then
-            local nested_diff = M.deep_compare(v1, v2, key_path)
-            if nested_diff then
-                table.insert(differences, nested_diff)
-            end
-        elseif v1 ~= v2 then
-            table.insert(differences, {
-                path = key_path,
-                t1 = v1 or 'T1LMAO',
-                t2 = v2 or "LMAO"
-            })
+    for _, pattern in ipairs(METADATA_PATTERNS) do
+        if str:match(pattern) then
+            return true
         end
     end
-
-    -- Check for keys in t2 that aren't in t1
-    for k, v2 in pairs(t2) do
-        if t1[k] == nil then
-            local key_path = path .. "." .. tostring(k)
-            table.insert(differences, {
-                path = key_path,
-                t1 = 'T1NilLMao',
-                t2 = v2
-            })
-        end
-    end
-
-    return #differences > 0 and differences or nil
+    return false
 end
+
+-- helper for test troubleshooting: Recursively print keys and values of a table
+M.print_table = function(tbl, indent)
+    indent = indent or 0
+    local space = string.rep("  ", indent)
+
+    for key, value in pairs(tbl) do
+        if type(value) == "table" then
+            print(space .. tostring(key) .. ":")
+            M.print_table(value, indent + 1)
+        else
+            print(space .. tostring(key) .. ": " .. tostring(value))
+        end
+    end
+end
+
+
+---@class LineHighlight
+---@field col number starting column
+---@field end_col number end column
+---@field hl_group string highlight group
 
 return M

@@ -9,6 +9,15 @@ if using for git, use git diff; else, use vim.text.diff. Use myers algorthm for 
 if we want consistency, we could use vim.text.diff for git as well, and just use git to get the files and the indexes and stuff. Seems like git diff is able to diff directories, while vim.text.diff cannot. But this can easily be spun up if we can get what files we need to diff.
 
 ### syntax highlighting
+the approach:
+1. Create a buffer, with formatted diff. create a mapping for where each row and column in the diff corresponds to, in terms of the source
+example: table<{filename, 'new' | 'old', col_delta}, row> 
+2. for each filename + 'new' | 'old' combination, get the treesitter hl_groups WITHOUT creating a new buffer
+3. sit those hl_groups in this sort of mapping
+example: table<(filename, 'new' | 'old'), table<row, {start_col, end_col, hl_group}>>
+4. after each file is parsed, immediately apply those hl_groups to the formatted buffer using the mapping. 
+example: tokens[{filename, 'new'}][row]
+
 
 ### integrations
 currently Deltaview.nvim uses the delta binary; this should be a drop in substitute, with slight differences in cursor tracking (due to line number and not having to parse them anymore, and instead we can use the buffer itself)

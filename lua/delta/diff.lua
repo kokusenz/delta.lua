@@ -1,8 +1,6 @@
 local M = {}
 local utils = require('delta.utils')
 
---- if git, do the appropriate logic to use that command and use that logic
---- if normal, use vim.text.diff stuff
 --- @param ref string
 --- @param path string | nil
 M.git_diff = function(ref, path)
@@ -29,10 +27,13 @@ M.git_diff = function(ref, path)
     end
 
     local data = M.get_diff_data_directory(diffstring)
-    --print_table(data)
+    -- create formatted buffer should start with a "loading" at the top
+    -- then it should show markdowns of every after file, and every before file, with markdowns
+    -- that will then get parsed
     local buf_id = M.create_formatted_buffer(data)
     vim.treesitter.start(buf_id)
-    --M.highlight_git_diff(data, buf_id)
+    -- we need to have this wait for treesitter
+    --utils.on_treesitter_parse_complete(buf_id, {function() M.highlight(buf_id) end})
     vim.api.nvim_create_user_command('ManualHighlight', function()
         M.highlight(buf_id)
     end, { desc = "Run delta diff on current buffer" })
@@ -46,6 +47,8 @@ end
 --- @param f1 string path of file 1
 --- @param f2 string path of file 2
 M.vim_diff = function(f1, f2)
+    -- TODO currently unfinished
+
     -- f1 open buffer, then get the lines content from buffer; maybe io.popen('cat ...').read
     local old_file = ''
     -- f2 do not open buffer, just need text contents
@@ -70,7 +73,6 @@ M.get_diff_data_directory = function(diff)
     local current_old_path = nil
     local current_new_path = nil
 
-    -- Helper function to process accumulated file lines
     local function finalize_current_file()
         if #current_file_lines > 0 and current_new_path then
             local file_diff_string = table.concat(current_file_lines, '\n')
@@ -79,7 +81,7 @@ M.get_diff_data_directory = function(diff)
             file_data.new_path = current_new_path
             result.files[current_new_path] = file_data
 
-            -- Reset for next file
+            -- reset for next file
             current_file_lines = {}
             current_old_path = nil
             current_new_path = nil
@@ -87,21 +89,19 @@ M.get_diff_data_directory = function(diff)
     end
 
     for _, line in ipairs(lines) do
-        -- File header: --- a/path/to/file
         if line:match('^%-%-%-') then
-            -- Finalize previous file before starting new one
+            -- File header: --- a/path/to/file
             finalize_current_file()
 
             current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+(.+)$')
 
-            -- File header: +++ b/path/to/file
         elseif line:match('^%+%+%+') then
+            -- File header: +++ b/path/to/file
             current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+(.+)$')
 
-            -- Skip git metadata lines (diff, index, etc.)
         elseif line:match('^diff ') or line:match('^index ') then
+            -- Skip git metadata lines (diff, index, etc.)
             -- Skip these lines
-
             -- Everything else belongs to the current file (hunks and their content)
         else
             table.insert(current_file_lines, line)
@@ -134,8 +134,8 @@ M.get_diff_data_file = function(diff)
     for _, line in ipairs(lines) do
         diff_line_num = diff_line_num + 1
 
-        -- Hunk header: @@ -old_start,old_count +new_start,new_count @@
         if line:match('^@@') then
+            -- hunk header: @@ -old_start,old_count +new_start,new_count @@
             local old_info, new_info = line:match('^@@[%s]+%-([^%s]+)[%s]+%+([^%s]+)[%s]+@@')
 
             if old_info and new_info then
@@ -147,7 +147,6 @@ M.get_diff_data_file = function(diff)
                 local new_start = tonumber(new_start_str) or 1
                 local new_count = tonumber(new_count_str) or 1
 
-                -- Initialize new hunk
                 current_hunk = {
                     lines = {},
                     old_start = old_start,
@@ -157,15 +156,14 @@ M.get_diff_data_file = function(diff)
                     header = line
                 }
 
-                -- Reset line counters for this hunk
                 old_line_num = old_start
                 new_line_num = new_start
 
                 table.insert(file_data.hunks, current_hunk)
             end
 
-            -- Added line
         elseif line:match('^%+') and current_hunk then
+            -- added line
             local content = line:sub(2) -- Remove '+' prefix
 
             table.insert(current_hunk.lines, {
@@ -179,23 +177,23 @@ M.get_diff_data_file = function(diff)
 
             new_line_num = new_line_num + 1
 
-            -- Removed line
         elseif line:match('^%-') and current_hunk then
-            --local content = line:sub(2) -- Remove '-' prefix
+            -- removed line
+            local content = line:sub(2) -- Remove '-' prefix
 
-            --table.insert(current_hunk.lines, {
-            --    content = content,
-            --    old_line_num = old_line_num,
-            --    new_line_num = nil,                      -- No new line (this is removed)
-            --    diff_line_num = diff_line_num,
-            --    formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
-            --    line_type = "removed"
-            --})
+            table.insert(current_hunk.lines, {
+                content = content,
+                old_line_num = old_line_num,
+                new_line_num = nil,                      -- No new line (this is removed)
+                diff_line_num = diff_line_num,
+                formatted_diff_line_num = diff_line_num, -- Initially same as diff_line_num
+                line_type = "removed"
+            })
 
-            --old_line_num = old_line_num + 1
+            old_line_num = old_line_num + 1
 
-            -- Context line (starts with space or is plain text in hunk)
         elseif current_hunk and line:match('^%s') then
+            -- context line (starts with space or is plain text in hunk)
             local content = line:sub(2) -- Remove leading space
 
             table.insert(current_hunk.lines, {
@@ -210,7 +208,6 @@ M.get_diff_data_file = function(diff)
             old_line_num = old_line_num + 1
             new_line_num = new_line_num + 1
         end
-        -- Skip other lines
     end
 
     return file_data
@@ -278,18 +275,8 @@ end
 
 M.highlight = function(bufnr)
     local highlights = utils.capture_highlights(bufnr)
-    --pcall(vim.treesitter.stop, bufnr)
     utils.freeze_and_isolate_highlights(bufnr)
     utils.reapply_highlights(bufnr, highlights)
-    --pcall(vim.treesitter.stop, bufnr)
-    --local after_highlights = utils.capture_highlights(bufnr)
-    --local differences = utils.deep_compare(after_highlights, highlights)
-    --if differences then
-    --    print("[Delta] Highlight differences detected:")
-    --    utils.print_table(differences)
-    --else
-    --    print("[Delta] No differences - highlights match perfectly!")
-    --end
 end
 
 --- @param diff_data DirectoryDiffData
