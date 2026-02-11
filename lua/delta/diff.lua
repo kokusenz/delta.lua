@@ -1,8 +1,10 @@
 local M = {}
 local utils = require('delta.utils')
 
+--- creates a delta buffer and puts it in the current window
 --- @param ref string
 --- @param path string | nil
+--- @return number bufnr
 M.git_diff = function(ref, path)
     -- get the output of the git diff, pass into get_hunks
     --local current_bufnr = vim.api.nvim_get_current_buf()
@@ -33,6 +35,7 @@ M.git_diff = function(ref, path)
     local buf_id = M.create_formatted_buffer(data)
     M.highlight_git_diff(data, buf_id)
     vim.api.nvim_win_set_buf(0, buf_id)
+    return buf_id
 end
 
 --- TODO; align this with the interface that mini.diff provides, such that codecompanion/ai tooling can use for their diffs. maybe that isn't using paths; I don't know how ai does it. Maybe the llm generates patches directly, and mini.diff can take patch files as input
@@ -59,48 +62,46 @@ M.get_diff_data_directory = function(diff)
 
     --- @type DirectoryDiffData
     local result = {
-        files = {}
+        files = {},
+        delta_artifacts = nil
     }
 
+    --- @type table<string>
     local current_file_lines = {}
     local current_old_path = nil
     local current_new_path = nil
 
-    local function finalize_current_file()
-        if #current_file_lines > 0 and current_new_path then
-            local file_diff_string = table.concat(current_file_lines, '\n')
+    local function finalize_current_file(file_lines)
+        if #file_lines > 0 and current_new_path then
+            local file_diff_string = table.concat(file_lines, '\n')
             local file_data = M.get_diff_data_file(file_diff_string)
             file_data.old_path = current_old_path
             file_data.new_path = current_new_path
             result.files[current_new_path] = file_data
-
-            -- reset for next file
-            current_file_lines = {}
-            current_old_path = nil
-            current_new_path = nil
         end
     end
 
     for _, line in ipairs(lines) do
-        if line:match('^%-%-%-') then
-            -- File header: --- a/path/to/file
-            finalize_current_file()
-
-            current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+(.+)$')
+        if line:match('^diff %-%-git') then
+            -- new file starting: calculate the diff for the old file
+            finalize_current_file(current_file_lines)
+            current_file_lines = {}
+            current_old_path = nil
+            current_new_path = nil
+        elseif line:match('^%-%-%-') then
+            -- file header: --- a/path/to/file or --- /dev/null
+            current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+/dev/null$')
         elseif line:match('^%+%+%+') then
-            -- File header: +++ b/path/to/file
-            current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+(.+)$')
-        elseif line:match('^diff ') or line:match('^index ') then
-            -- Skip git metadata lines (diff, index, etc.)
-            -- Skip these lines
-            -- Everything else belongs to the current file (hunks and their content)
+            -- file header: +++ b/path/to/file or +++ /dev/null
+            current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+/dev/null$')
+        elseif line:match('^index ') then
+            -- skip git metadata line: index hash1..hash2 mode
         else
             table.insert(current_file_lines, line)
         end
     end
 
-    -- Finalize the last file
-    finalize_current_file()
+    finalize_current_file(current_file_lines)
 
     return result
 end
@@ -201,16 +202,17 @@ M.get_diff_data_file = function(diff)
     return file_data
 end
 
+--- modifies diff_data as well as returns the buf_id. not happy about it, but better than returning a tuple or something
 --- @param diff_data DirectoryDiffData
 --- @return number buf_id
 M.create_formatted_buffer = function(diff_data)
-    -- Create buffer with proper options
+    -- TODO figure out how to configure line numbers
     local diff_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
     vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
 
     local output_lines = {}
-    local current_line_num = 0 -- Track current line number in formatted buffer (0-indexed)
+    local current_line_num = 0
     local separator_width = utils.get_window_width(0)
 
     local bar = '─'
@@ -218,80 +220,70 @@ M.create_formatted_buffer = function(diff_data)
     local top_corner = '┐'
     local bottom_corner = '┘'
 
-    -- Process each file
+    diff_data.delta_artifacts = diff_data.delta_artifacts or {}
+
     for filename, file_data in pairs(diff_data.files) do
-        -- Add file header (just the new filename)
         table.insert(output_lines, filename)
+        diff_data.delta_artifacts[current_line_num] = filename
         current_line_num = current_line_num + 1
 
-        -- Use full buffer width for separator instead of just filename length
         table.insert(output_lines, bar:rep(separator_width))
+        diff_data.delta_artifacts[current_line_num] = bar:rep(separator_width)
         current_line_num = current_line_num + 1
 
-        table.insert(output_lines, "") -- Blank line after filename
+        table.insert(output_lines, "")
         current_line_num = current_line_num + 1
 
-        -- Get language for code fence based on file extension
-        local lang = utils.get_language_from_filename(filename)
-
-        -- Process each hunk in the file
         for _, hunk in ipairs(file_data.hunks) do
-            -- Add hunk header with new line number
+            -- TODO delta is able to grab the actual function the code is inside, not just the line number. Not sure how this looks like in oop or larger function signatures
             local hunk_header = string.format("Line %d ", hunk.new_start)
-            table.insert(output_lines, bar:rep(#hunk_header) .. top_corner)
+            local formatted_hunk_header = hunk_header .. pipe
+            local formatted_hunk_header_top = bar:rep(#hunk_header) .. top_corner
+            local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
+            table.insert(output_lines, formatted_hunk_header_top)
+            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_top
             current_line_num = current_line_num + 1
 
-            table.insert(output_lines, hunk_header .. pipe)
+            table.insert(output_lines, formatted_hunk_header)
+            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header
             current_line_num = current_line_num + 1
 
-            table.insert(output_lines, bar:rep(#hunk_header) .. bottom_corner)
+            table.insert(output_lines, formatted_hunk_header_bottom)
+            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_bottom
             current_line_num = current_line_num + 1
 
-            -- Process each line in the hunk
             for _, line in ipairs(hunk.lines) do
-                -- Add content without +/- prefixes (already removed in parsing)
                 table.insert(output_lines, line.content)
 
-                -- Update formatted_diff_line_num to track position in formatted buffer
                 line.formatted_diff_line_num = current_line_num
                 current_line_num = current_line_num + 1
             end
 
-            table.insert(output_lines, "") -- Blank line after hunk
+            table.insert(output_lines, "")
             current_line_num = current_line_num + 1
         end
     end
 
-    -- Set buffer content (temporarily make it modifiable)
     vim.api.nvim_set_option_value('modifiable', true, { buf = diff_bufnr })
     vim.api.nvim_buf_set_lines(diff_bufnr, 0, -1, false, output_lines)
-    --vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
+    vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
 
     return diff_bufnr
-end
-
-M.highlight = function(bufnr)
-    local highlights = utils.capture_highlights(bufnr)
-    utils.freeze_and_isolate_highlights(bufnr)
-    utils.apply_highlights(bufnr, highlights)
 end
 
 --- @param diff_data DirectoryDiffData
 --- @param bufnr number id of buffer with the diffed contents
 M.highlight_git_diff = function(diff_data, bufnr)
-    -- Find git root directory
     local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
     if vim.v.shell_error ~= 0 then
         vim.notify("Not in a git repository", vim.log.levels.WARN)
         return
     end
 
-    -- Iterate through each file and apply highlighting
+    M.highlight_delta_artifacts(diff_data, bufnr)
     for filename, file_data in pairs(diff_data.files) do
-        -- Construct full path to source file
         local source_path = git_root .. '/' .. filename
 
-        -- Check if file exists
         if vim.fn.filereadable(source_path) == 0 then
             vim.notify("File not found: " .. source_path, vim.log.levels.WARN)
             goto continue
@@ -301,6 +293,31 @@ M.highlight_git_diff = function(diff_data, bufnr)
 
         ::continue::
     end
+end
+
+--- @param diff_data DirectoryDiffData
+--- @param bufnr number
+M.highlight_delta_artifacts = function(diff_data, bufnr)
+    if not diff_data.delta_artifacts then
+        return
+    end
+
+    --- @type table<number, table<LineHighlight>>
+    local artifact_highlights = {}
+
+    for line_num, content in pairs(diff_data.delta_artifacts) do
+        local line_length = #content
+        artifact_highlights[line_num] = {
+            {
+                col = 0,
+                end_col = line_length,
+                priority = 150,
+                hl_group = 'Title' -- Blue/gray color typically used for comments
+            }
+        }
+    end
+
+    utils.apply_highlights(bufnr, artifact_highlights)
 end
 
 
@@ -380,3 +397,4 @@ return M
 --- A key-value table where key is the filename, and the value is FileData
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
+--- @field delta_artifacts table<number, string> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created
