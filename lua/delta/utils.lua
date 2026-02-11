@@ -1,10 +1,58 @@
 local M = {}
 
+--- @param text string
+--- @param lang string
+--- @return table<number, table<LineHighlight>>
+M.get_treesitter_highlight_captures = function(text, lang)
+    local language_tree = vim.treesitter.get_string_parser(text, lang)
+    language_tree:parse()
+    local line_highlights = {}
+
+    local text_lines = vim.split(text, '\n', { plain = true })
+
+    language_tree:for_each_tree(function(tree, ltree)
+        local tree_lang = ltree:lang()
+        local query = vim.treesitter.query.get(tree_lang, 'highlights')
+        if not query then
+            return
+        end
+
+        for id, node, metadata in query:iter_captures(tree:root(), text) do
+            local capture_name = query.captures[id]
+            if M.is_metadata_pattern(capture_name) then
+                goto continue
+            end
+            local start_row, start_col, end_row, end_col = node:range()
+
+            for row = start_row, end_row do
+                line_highlights[row] = line_highlights[row] or {}
+
+                local row_start_col = (row == start_row) and start_col or 0
+                local line_length = text_lines[row + 1] and #text_lines[row + 1] or 0
+                local row_end_col = (row == end_row) and end_col or line_length
+
+                table.insert(line_highlights[row], {
+                    col = row_start_col,
+                    end_col = row_end_col,
+                    priority = (metadata and metadata.priority) or id,
+                    hl_group = "@" .. capture_name .. "." .. tree_lang
+                })
+            end
+            ::continue::
+        end
+    end)
+
+    --M.print_table(line_highlights)
+    return line_highlights
+end
+
 --- @param bufnr number
 --- @return table<number, LineHighlight>
 M.capture_highlights = function(bufnr)
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     local line_highlights = {}
+    local unique_hl_groups = {} -- Track unique highlight groups
+
     for line_number, line_content in ipairs(lines) do
         local highlights = {}
         if not line_content then
@@ -36,6 +84,10 @@ M.capture_highlights = function(bufnr)
                         end_col = col,
                         hl_group = prev_group
                     })
+                    -- Add to unique groups if not already present
+                    if not unique_hl_groups[prev_group] then
+                        unique_hl_groups[prev_group] = true
+                    end
                 end
                 start_col = col
                 prev_group = current_group
@@ -43,22 +95,38 @@ M.capture_highlights = function(bufnr)
         end
         line_highlights[line_number] = highlights
     end
+
+    -- Print all unique highlight groups
+    print("Unique highlight groups captured:")
+    for hl_group, _ in pairs(unique_hl_groups) do
+        print("  " .. hl_group)
+    end
+
     return line_highlights
 end
 
 --- @param bufnr number
---- @param highlights table<number, LineHighlight>
-M.reapply_highlights = function(bufnr, highlights)
-    local ns_id = vim.api.nvim_create_namespace("frozen_treesitter_highlights")
-    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+--- @param highlights table<number, table<LineHighlight>>
+M.apply_highlights = function(bufnr, highlights)
+    local ns_id = vim.api.nvim_create_namespace("manual_treesitter_highlights")
 
     for line_number, highlight in pairs(highlights) do
         for _, hl in ipairs(highlight) do
-            vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number - 1, hl.col, {
-                end_col = hl.end_col,
-                hl_group = hl.hl_group,
-                priority = 101
-            })
+            -- lines are 0 based
+            local success, err = pcall(function()
+                vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number, hl.col, {
+                    end_col = hl.end_col,
+                    hl_group = hl.hl_group,
+                    priority = hl.priority
+                })
+            end)
+
+            if not success then
+                print("Error applying highlight:")
+                vim.print(vim.api.nvim_buf_get_lines(bufnr, line_number, line_number + 1, true))
+                print("  hl: " .. vim.inspect(hl))
+                print("  error: " .. tostring(err))
+            end
         end
     end
     return ns_id
@@ -177,6 +245,42 @@ M.is_metadata_pattern = function(str)
     return false
 end
 
+M.get_window_width = function(winid)
+    local win_width = vim.api.nvim_win_get_width(winid)
+    local numberwidth = vim.api.nvim_get_option_value('numberwidth', { win = winid })
+    local signcolumn = vim.api.nvim_get_option_value('signcolumn', { win = winid })
+    local foldcolumn = vim.api.nvim_get_option_value('foldcolumn', { win = winid })
+
+    local gutter_width = 0
+    if vim.api.nvim_get_option_value('number', { win = winid }) or vim.api.nvim_get_option_value('relativenumber', { win = winid }) then
+        gutter_width = gutter_width + numberwidth
+    end
+    if signcolumn == 'yes' or signcolumn == 'auto' then
+        gutter_width = gutter_width + 2 -- sign column is typically 2 chars wide
+    end
+    gutter_width = gutter_width + tonumber(foldcolumn)
+
+    return win_width - gutter_width
+end
+
+--- Read file contents without opening a vim buffer
+--- @param filepath string Full path to the file
+--- @return table|nil lines Array of lines from the file, or nil if error
+M.read_file_lines = function(filepath)
+    local file = io.open(filepath, 'r')
+    if not file then
+        return nil
+    end
+
+    local lines = {}
+    for line in file:lines() do
+        table.insert(lines, line)
+    end
+    file:close()
+
+    return lines
+end
+
 -- helper for test troubleshooting: Recursively print keys and values of a table
 M.print_table = function(tbl, indent)
     indent = indent or 0
@@ -196,6 +300,7 @@ end
 ---@class LineHighlight
 ---@field col number starting column
 ---@field end_col number end column
+---@field priority string priority
 ---@field hl_group string highlight group
 
 return M

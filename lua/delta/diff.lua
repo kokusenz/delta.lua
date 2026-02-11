@@ -31,14 +31,7 @@ M.git_diff = function(ref, path)
     -- then it should show markdowns of every after file, and every before file, with markdowns
     -- that will then get parsed
     local buf_id = M.create_formatted_buffer(data)
-    vim.treesitter.start(buf_id)
-    -- we need to have this wait for treesitter
-    --utils.on_treesitter_parse_complete(buf_id, {function() M.highlight(buf_id) end})
-    vim.api.nvim_create_user_command('ManualHighlight', function()
-        M.highlight(buf_id)
-    end, { desc = "Run delta diff on current buffer" })
-
-    vim.cmd('vsplit')
+    M.highlight_git_diff(data, buf_id)
     vim.api.nvim_win_set_buf(0, buf_id)
 end
 
@@ -94,11 +87,9 @@ M.get_diff_data_directory = function(diff)
             finalize_current_file()
 
             current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+(.+)$')
-
         elseif line:match('^%+%+%+') then
             -- File header: +++ b/path/to/file
             current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+(.+)$')
-
         elseif line:match('^diff ') or line:match('^index ') then
             -- Skip git metadata lines (diff, index, etc.)
             -- Skip these lines
@@ -161,7 +152,6 @@ M.get_diff_data_file = function(diff)
 
                 table.insert(file_data.hunks, current_hunk)
             end
-
         elseif line:match('^%+') and current_hunk then
             -- added line
             local content = line:sub(2) -- Remove '+' prefix
@@ -176,7 +166,6 @@ M.get_diff_data_file = function(diff)
             })
 
             new_line_num = new_line_num + 1
-
         elseif line:match('^%-') and current_hunk then
             -- removed line
             local content = line:sub(2) -- Remove '-' prefix
@@ -191,7 +180,6 @@ M.get_diff_data_file = function(diff)
             })
 
             old_line_num = old_line_num + 1
-
         elseif current_hunk and line:match('^%s') then
             -- context line (starts with space or is plain text in hunk)
             local content = line:sub(2) -- Remove leading space
@@ -220,15 +208,24 @@ M.create_formatted_buffer = function(diff_data)
     local diff_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
     vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
-    vim.api.nvim_set_option_value('filetype', 'markdown', { buf = diff_bufnr })
 
     local output_lines = {}
     local current_line_num = 0 -- Track current line number in formatted buffer (0-indexed)
+    local separator_width = utils.get_window_width(0)
+
+    local bar = '─'
+    local pipe = '│'
+    local top_corner = '┐'
+    local bottom_corner = '┘'
 
     -- Process each file
     for filename, file_data in pairs(diff_data.files) do
         -- Add file header (just the new filename)
         table.insert(output_lines, filename)
+        current_line_num = current_line_num + 1
+
+        -- Use full buffer width for separator instead of just filename length
+        table.insert(output_lines, bar:rep(separator_width))
         current_line_num = current_line_num + 1
 
         table.insert(output_lines, "") -- Blank line after filename
@@ -240,11 +237,14 @@ M.create_formatted_buffer = function(diff_data)
         -- Process each hunk in the file
         for _, hunk in ipairs(file_data.hunks) do
             -- Add hunk header with new line number
-            local hunk_header = string.format("Line %d", hunk.new_start)
-            table.insert(output_lines, hunk_header)
+            local hunk_header = string.format("Line %d ", hunk.new_start)
+            table.insert(output_lines, bar:rep(#hunk_header) .. top_corner)
             current_line_num = current_line_num + 1
 
-            table.insert(output_lines, '```' .. lang)
+            table.insert(output_lines, hunk_header .. pipe)
+            current_line_num = current_line_num + 1
+
+            table.insert(output_lines, bar:rep(#hunk_header) .. bottom_corner)
             current_line_num = current_line_num + 1
 
             -- Process each line in the hunk
@@ -256,9 +256,6 @@ M.create_formatted_buffer = function(diff_data)
                 line.formatted_diff_line_num = current_line_num
                 current_line_num = current_line_num + 1
             end
-
-            table.insert(output_lines, '```')
-            current_line_num = current_line_num + 1
 
             table.insert(output_lines, "") -- Blank line after hunk
             current_line_num = current_line_num + 1
@@ -276,12 +273,12 @@ end
 M.highlight = function(bufnr)
     local highlights = utils.capture_highlights(bufnr)
     utils.freeze_and_isolate_highlights(bufnr)
-    utils.reapply_highlights(bufnr, highlights)
+    utils.apply_highlights(bufnr, highlights)
 end
 
 --- @param diff_data DirectoryDiffData
---- @param diff_buf_id number id of buffer with the diffed contents
-M.highlight_git_diff = function(diff_data, diff_buf_id)
+--- @param bufnr number id of buffer with the diffed contents
+M.highlight_git_diff = function(diff_data, bufnr)
     -- Find git root directory
     local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
     if vim.v.shell_error ~= 0 then
@@ -300,19 +297,7 @@ M.highlight_git_diff = function(diff_data, diff_buf_id)
             goto continue
         end
 
-        -- Open file in a hidden buffer
-        local source_buf_id = vim.fn.bufadd(source_path)
-        local was_loaded = vim.api.nvim_buf_is_loaded(source_buf_id)
-        vim.fn.bufload(source_buf_id)
-
-        -- Set filetype to trigger syntax highlighting
-        --local filetype = vim.filetype.match({ buf = source_buf_id, filename = source_path })
-        --if filetype then
-        --    vim.api.nvim_set_option_value("filetype", filetype, { buf = source_buf_id })
-        --end
-
-        -- Apply highlighting for this file
-        M.highlight_diff_file(file_data, diff_buf_id, source_buf_id)
+        M.highlight_diff_file(file_data, bufnr, source_path)
 
         ::continue::
     end
@@ -320,67 +305,52 @@ end
 
 
 --- @param file_data FileDiffData
---- @param diff_buf_id number
---- @param source_buf_id number
-M.highlight_diff_file = function(file_data, diff_buf_id, source_buf_id)
-    if not vim.api.nvim_buf_is_valid(source_buf_id) or not vim.api.nvim_buf_is_valid(diff_buf_id) then
+--- @param bufnr number
+--- @param filepath string Full path to the source file
+M.highlight_diff_file = function(file_data, bufnr, filepath)
+    local lang = utils.get_language_from_filename(file_data.new_path)
+
+    local lines = utils.read_file_lines(filepath)
+    if not lines then
+        vim.notify('Could not read file: ' .. filepath, vim.log.levels.WARN)
         return
     end
 
-    -- Create line mapping for added lines
-    --local line_map = {} -- Maps source line number to target line number
-    --for _, hunk in ipairs(file_data.hunks) do
-    --    for _, line in ipairs(hunk.lines) do
-    --        if line.new_line_num then
-    --            line_map[line.new_line_num] = line.formatted_diff_line_num
-    --        end
-    --    end
-    --end
+    local content = table.concat(lines, '\n')
+    local tokens = utils.get_treesitter_highlight_captures(content, lang)
 
-    local line_map = {} -- Maps source line number to target line number
+    --- @type table<number, table<LineHighlight>>
+    local new_highlights = {}
     for _, hunk in ipairs(file_data.hunks) do
         for _, line in ipairs(hunk.lines) do
-            if line.new_line_num then
-                line_map[line.formatted_diff_line_num] = line.new_line_num
+            if line.line_type == 'context' then
+                new_highlights[line.formatted_diff_line_num] = tokens[line.new_line_num - 1]
+            elseif line.line_type == 'added' then
+                local line_length = #line.content
+                local hls = tokens[line.new_line_num - 1] or {}
+                local add_highlight = {
+                    col = 0,
+                    end_col = line_length,
+                    priority = 200,
+                    hl_group = 'DiffAdd'
+                }
+
+                table.insert(hls, 1, add_highlight)
+                new_highlights[line.formatted_diff_line_num] = hls
+            else
+                local line_length = #line.content
+                new_highlights[line.formatted_diff_line_num] = {
+                    {
+                        col = 0,
+                        end_col = line_length,
+                        priority = 200,
+                        hl_group = 'DiffDelete'
+                    }
+                }
             end
         end
     end
-
-    -- Mapping: display_line -> {buf = before_buf, line = 5}
-    local ns = vim.api.nvim_create_namespace('diff_display')
-    local unpack = unpack or table.unpack
-    vim.api.nvim_set_decoration_provider(ns, {
-        on_win = function(_, winid, bufnr, topline, botline)
-            if bufnr ~= diff_buf_id then return false end
-
-            for display_line = topline, botline do
-                local source = line_map[display_line]
-                if source then
-                    -- Get highlights from the source buffer at the source line
-                    local marks = vim.api.nvim_buf_get_extmarks(
-                        source_buf_id,
-                        -1, -- all namespaces
-                        { 0, 0 },
-                        { -1, -1 },
-                        { details = true }
-                    )
-                    M.print_table(marks)
-
-                    -- Apply them to the display buffer
-                    for _, mark in ipairs(marks) do
-                        local _, _, _, opts = unpack(mark)
-                        if opts.hl_group then
-                            vim.api.nvim_buf_set_extmark(bufnr, ns, display_line, opts.end_col or 0, {
-                                end_col = opts.end_col,
-                                hl_group = opts.hl_group,
-                                ephemeral = true, -- key: these are temporary per redraw
-                            })
-                        end
-                    end
-                end
-            end
-        end,
-    })
+    utils.apply_highlights(bufnr, new_highlights)
 end
 
 
