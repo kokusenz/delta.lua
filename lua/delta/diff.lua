@@ -4,7 +4,7 @@ local utils = require('delta.utils')
 --- creates a delta buffer and puts it in the current window
 --- @param ref string
 --- @param path string | nil
---- @return number bufnr
+--- @return number | nil bufnr
 M.git_diff = function(ref, path)
     -- get the output of the git diff, pass into get_hunks
     --local current_bufnr = vim.api.nvim_get_current_buf()
@@ -33,8 +33,9 @@ M.git_diff = function(ref, path)
     -- then it should show markdowns of every after file, and every before file, with markdowns
     -- that will then get parsed
     local buf_id = M.create_formatted_buffer(data)
+    M.open_buffer(buf_id)
+    -- highlight after opening, so treesitter isn't blocking.
     M.highlight_git_diff(data, buf_id)
-    vim.api.nvim_win_set_buf(0, buf_id)
     return buf_id
 end
 
@@ -206,14 +207,17 @@ end
 --- @param diff_data DirectoryDiffData
 --- @return number buf_id
 M.create_formatted_buffer = function(diff_data)
-    -- TODO figure out how to configure line numbers
     local diff_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
     vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
 
     local output_lines = {}
     local current_line_num = 0
-    local separator_width = utils.get_window_width(0)
+    local separator_width = utils.get_window_width(0) - 8
+
+    -- Line number mapping for statuscolumn
+    --- @type table<number, {old: number|nil, new: number|nil}>
+    local line_map = {}
 
     local bar = '─'
     local pipe = '│'
@@ -225,13 +229,16 @@ M.create_formatted_buffer = function(diff_data)
     for filename, file_data in pairs(diff_data.files) do
         table.insert(output_lines, filename)
         diff_data.delta_artifacts[current_line_num] = filename
+        line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
         table.insert(output_lines, bar:rep(separator_width))
         diff_data.delta_artifacts[current_line_num] = bar:rep(separator_width)
+        line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
         table.insert(output_lines, "")
+        line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
         for _, hunk in ipairs(file_data.hunks) do
@@ -242,24 +249,35 @@ M.create_formatted_buffer = function(diff_data)
             local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
             table.insert(output_lines, formatted_hunk_header_top)
             diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_top
+            line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header)
             diff_data.delta_artifacts[current_line_num] = formatted_hunk_header
+            line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header_bottom)
             diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_bottom
+            line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             for _, line in ipairs(hunk.lines) do
                 table.insert(output_lines, line.content)
 
                 line.formatted_diff_line_num = current_line_num
+
+                -- Store old and new line numbers for statuscolumn (1-based indexing)
+                line_map[current_line_num + 1] = {
+                    old = line.old_line_num,
+                    new = line.new_line_num
+                }
+
                 current_line_num = current_line_num + 1
             end
 
             table.insert(output_lines, "")
+            line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
         end
     end
@@ -268,31 +286,10 @@ M.create_formatted_buffer = function(diff_data)
     vim.api.nvim_buf_set_lines(diff_bufnr, 0, -1, false, output_lines)
     vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
 
+    -- Store line mapping in buffer variable for statuscolumn
+    vim.b[diff_bufnr].delta_line_map = line_map
+
     return diff_bufnr
-end
-
---- @param diff_data DirectoryDiffData
---- @param bufnr number id of buffer with the diffed contents
-M.highlight_git_diff = function(diff_data, bufnr)
-    local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
-    if vim.v.shell_error ~= 0 then
-        vim.notify("Not in a git repository", vim.log.levels.WARN)
-        return
-    end
-
-    M.highlight_delta_artifacts(diff_data, bufnr)
-    for filename, file_data in pairs(diff_data.files) do
-        local source_path = git_root .. '/' .. filename
-
-        if vim.fn.filereadable(source_path) == 0 then
-            vim.notify("File not found: " .. source_path, vim.log.levels.WARN)
-            goto continue
-        end
-
-        M.highlight_diff_file(file_data, bufnr, source_path)
-
-        ::continue::
-    end
 end
 
 --- @param diff_data DirectoryDiffData
@@ -320,11 +317,37 @@ M.highlight_delta_artifacts = function(diff_data, bufnr)
     utils.apply_highlights(bufnr, artifact_highlights)
 end
 
+--- highlights each file one by one
+--- @param diff_data DirectoryDiffData
+--- @param bufnr number id of buffer with the diffed contents
+M.highlight_git_diff = function(diff_data, bufnr)
+    local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
+    if vim.v.shell_error ~= 0 then
+        vim.notify("Not in a git repository", vim.log.levels.WARN)
+        return
+    end
 
+    M.highlight_delta_artifacts(diff_data, bufnr)
+    for filename, file_data in pairs(diff_data.files) do
+        local source_path = git_root .. '/' .. filename
+
+        if vim.fn.filereadable(source_path) == 0 then
+            vim.notify("File not found: " .. source_path, vim.log.levels.WARN)
+            goto continue
+        end
+
+        M.highlight_diff_file(file_data, bufnr, source_path)
+
+        ::continue::
+    end
+end
+
+--- highlights a file by getting the treesitter captures on the full, original file
 --- @param file_data FileDiffData
 --- @param bufnr number
 --- @param filepath string Full path to the source file
 M.highlight_diff_file = function(file_data, bufnr, filepath)
+    -- TODO: two tier highlighting
     local lang = utils.get_language_from_filename(file_data.new_path)
 
     local lines = utils.read_file_lines(filepath)
@@ -355,6 +378,8 @@ M.highlight_diff_file = function(file_data, bufnr, filepath)
                 table.insert(hls, 1, add_highlight)
                 new_highlights[line.formatted_diff_line_num] = hls
             else
+                -- TODO: we can grab the old file, use the old_line_num to grab the tokens for that, to syntax highlight the negative changes
+                -- little benefit though, and pure white or pure red may look more intuitive to most people who are used to that. Delta is pure white.
                 local line_length = #line.content
                 new_highlights[line.formatted_diff_line_num] = {
                     {
@@ -368,6 +393,32 @@ M.highlight_diff_file = function(file_data, bufnr, filepath)
         end
     end
     utils.apply_highlights(bufnr, new_highlights)
+end
+
+--- @param bufnr number
+M.open_buffer = function(bufnr)
+    vim.api.nvim_win_set_buf(0, bufnr)
+
+    -- Save the current statuscolumn to restore later
+    local saved_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = 0 })
+
+    -- Set custom statuscolumn for this window
+    vim.api.nvim_set_option_value('statuscolumn',
+        '%{%v:lua.require("delta.statuscolumn").render(v:lnum)%}',
+        { win = 0 }
+    )
+
+    -- Restore statuscolumn when leaving the buffer
+    vim.api.nvim_create_autocmd('BufLeave', {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            -- Only restore if the window is still valid
+            if vim.api.nvim_win_is_valid(0) then
+                vim.api.nvim_set_option_value('statuscolumn', saved_statuscolumn, { win = 0 })
+            end
+        end
+    })
 end
 
 
