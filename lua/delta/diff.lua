@@ -113,6 +113,7 @@ end
 --- @param diff string the diff for a file (starting from first @@ hunk header)
 --- @return FileDiffData
 M.get_diff_data_file = function(diff)
+    -- TODO double check that I am getting all the lines. I noticed I am missing a line compared to the git diff
     local lines = vim.split(diff, '\n', { plain = true })
 
     --- @type FileDiffData
@@ -407,7 +408,6 @@ M.highlight_diffs = function(diff_data, bufnr)
     -- parse it, maybe using M.get_diff_data_file, then apply a double strength highlight to those added characters
 
     local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files)
-    --utils.print_table(file_highlights)
 
     utils.apply_highlights(bufnr, file_highlights)
 end

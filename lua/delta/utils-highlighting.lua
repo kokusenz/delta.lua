@@ -18,15 +18,58 @@ end
 M.get_highlights_file = function(file)
     local highlights = {}
     for _, hunk in ipairs(file.hunks) do
+        -- normal line highlighting
+        local line_highlights = M.get_line_highlights(hunk)
+        for line_number, line_highlight in pairs(line_highlights) do
+            local cur_highlights = highlights[line_number] or {}
+            for _, highlight in ipairs(line_highlight) do
+                table.insert(cur_highlights, highlight)
+            end
+            highlights[line_number] = cur_highlights
+        end
+        -- two tier highlighting
         -- within one hunk, check to see what lines are adjacent to each other that are not context
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
-        local new_highlights = M.get_highlights(adjacent_lines_sets)
-        for line_number, new_highlight in pairs(new_highlights) do
-            highlights[line_number] = new_highlight
+        local word_highlights = M.get_highlights(adjacent_lines_sets)
+        for line_number, word_highlight in pairs(word_highlights) do
+            local cur_highlights = highlights[line_number] or {}
+            for _, highlight in ipairs(word_highlight) do
+                table.insert(cur_highlights, highlight)
+            end
+            highlights[line_number] = cur_highlights
         end
     end
     return highlights
+end
+
+--- @param hunk Hunk
+--- @return table<number, LineHighlight[]>
+M.get_line_highlights = function(hunk)
+    local line_highlights = {}
+    for _, line in ipairs(hunk.lines) do
+        if line.line_type == 'added' then
+            local line_length = #line.content
+            local add_highlight = {
+                col = 0,
+                end_col = line_length,
+                priority = 200,
+                hl_group = 'DiffAdd'
+            }
+
+            line_highlights[line.formatted_diff_line_num] = { add_highlight }
+        elseif line.line_type == 'removed' then
+            local line_length = #line.content
+            local remove_highlight = {
+                col = 0,
+                end_col = line_length,
+                priority = 200,
+                hl_group = 'DiffDelete'
+            }
+            line_highlights[line.formatted_diff_line_num] = { remove_highlight }
+        end
+    end
+    return line_highlights
 end
 
 --- @param adjacent_lines_sets table<number, DiffLine>[]
@@ -98,7 +141,7 @@ M.get_highlights = function(adjacent_lines_sets)
             end
 
             -- if loop runs at least once, max_similarity[2] guaranteed to be non null
-            local diff_highlights = M.get_diff_highlight(adjacent_lines[diff_line_num].content,
+            local diff_highlights = M.get_word_diff_highlights(adjacent_lines[diff_line_num].content,
                 adjacent_lines[max_similarity[2]].content)
             highlights[diff_line_num] = diff_highlights.added
             highlights[max_similarity[2]] = diff_highlights.removed
@@ -123,8 +166,10 @@ M.get_adjacent_line_sets = function(hunk)
             for _, adjacent_lines in ipairs(adjacent_lines_sets) do
                 if adjacent_lines[line.formatted_diff_line_num] ~= nil then
                     adjacent_lines[line.formatted_diff_line_num] = line
-                    adjacent_lines[line.formatted_diff_line_num - 1] = adjacent_lines[line.formatted_diff_line_num - 1] or ''
-                    adjacent_lines[line.formatted_diff_line_num + 1] = adjacent_lines[line.formatted_diff_line_num + 1] or ''
+                    adjacent_lines[line.formatted_diff_line_num - 1] = adjacent_lines[line.formatted_diff_line_num - 1] or
+                        ''
+                    adjacent_lines[line.formatted_diff_line_num + 1] = adjacent_lines[line.formatted_diff_line_num + 1] or
+                        ''
                     goto adjacent_line_set_found
                 end
             end
@@ -151,6 +196,7 @@ M.get_adjacent_line_sets = function(hunk)
     return adjacent_lines_sets
 end
 
+--- Levenshtein distance
 --- @param str1 string
 --- @param str2 string
 --- @return number similarity (0.0 = completely different, 1.0 = identical)
@@ -158,95 +204,125 @@ M.calculate_similarity = function(str1, str2)
     if str1 == str2 then return 1.0 end
     if str1 == "" or str2 == "" then return 0.0 end
 
-    -- Simple approach: ratio of common characters
     local len1, len2 = #str1, #str2
-    local max_len = math.max(len1, len2)
+    local matrix = {}
 
-    -- Use vim.diff to count differences
-    local diff = vim.text.diff(str1, str2, {
-        result_type = 'indices',
-        algorithm = 'myers',
-        ctxlen = 0
-    })
+    for i = 0, len1 do matrix[i] = { [0] = i } end
+    for j = 0, len2 do matrix[0][j] = j end
 
-    -- Calculate changed characters
-    local changed = 0
-    for _, change in ipairs(diff or {}) do
-        changed = changed + math.max(change[2] or 0, change[4] or 0)
+    for i = 1, len1 do
+        for j = 1, len2 do
+            local cost = (str1:sub(i, i) == str2:sub(j, j)) and 0 or 1
+            matrix[i][j] = math.min(
+                matrix[i - 1][j] + 1,   -- deletion
+                matrix[i][j - 1] + 1,   -- insertion
+                matrix[i - 1][j - 1] + cost -- substitution
+            )
+        end
     end
 
-    return 1.0 - (changed / max_len)
+    local distance = matrix[len1][len2]
+    local max_len = math.max(len1, len2)
+
+    return 1.0 - (distance / max_len)
 end
 
 --- @param str1 string (the added/green line)
 --- @param str2 string (the removed/red line)
 --- @return TwoTierHighlights highlights for both strings
-M.get_diff_highlight = function(str1, str2)
-    -- Use 'indices' to get character-level changes
-    -- insert a \n between every character to force line-based diff to work character-by-character
-    local new_lined_str1 = str1:gsub("(.)", "%1\n")
-    local new_lined_str2 = str2:gsub("(.)", "%1\n")
+M.get_word_diff_highlights = function(str1, str2)
+    -- insert a \n between every word to force line-based diff to work word-by-word
+    -- Word boundaries: spaces, operators, punctuation (but keep dots within words like foo.bar as one word)
+    local new_lined_str1 = str1:gsub("([%w_]+)([^%w_]?)", "%1\n%2\n")
+    local new_lined_str2 = str2:gsub("([%w_]+)([^%w_]?)", "%1\n%2\n")
+
+    -- build token maps to convert line numbers back to character positions
+    --- @return Token[] tokens
+    local function build_token_map(original_str, newlined_str)
+        --- @class Token
+        --- @field start number
+        --- @field len number
+        local tokens = {}
+        local pos = 1
+        for token in newlined_str:gmatch("([^\n]+)") do
+            local token_start = original_str:find(token, pos, true)
+            if token_start then
+                table.insert(tokens, { start = token_start - 1, len = #token }) -- 0-indexed
+                pos = token_start + #token
+            end
+        end
+        return tokens
+    end
+
+    local tokens1 = build_token_map(str1, new_lined_str1)
+    local tokens2 = build_token_map(str2, new_lined_str2)
 
     local diff = vim.text.diff(
         new_lined_str1,
         new_lined_str2,
         { result_type = 'indices', algorithm = 'myers', ctxlen = 0 })
 
-    local not_indice_diff = vim.text.diff(
-        new_lined_str1,
-        new_lined_str2,
-        { algorithm = 'myers', ctxlen = 0 })
-
-    print("str1:", str1)
-    print("str2:", str2)
-    print("newlined str1:", new_lined_str1)
-    vim.print(not_indice_diff)
-
-    local add_highlight_line = {
-        col = 0,
-        end_col = #str1,
-        priority = 200,
-        hl_group = 'DiffAdd'
-    }
-
-    local remove_highlight_line = {
-        col = 0,
-        end_col = #str2,
-        priority = 200,
-        hl_group = 'DiffDelete'
-    }
-
     --- @type TwoTierHighlights
     local highlights = {
-        added = { },
-        removed = { }
+        added = {},
+        removed = {}
     }
 
     for _, change in ipairs(diff) do
-        local old_start, old_count, new_start, new_count = change[1], change[2], change[3], change[4]
+        local old_start, old_count, new_start, new_count = change[1] - 1, change[2], change[3] - 1, change[4]
 
-        -- Highlight changed parts of str1 (added/green line)
-        -- Divide by 2 since each character is now 2 chars (char + \n)
-        if old_count > 0 then
+        -- highlight changed parts of str1 (added/green line)
+        -- convert line numbers to character positions using token map
+        if old_count > 0 and tokens1[old_start + 1] then
+            local start_token = tokens1[old_start + 1]
+            local end_token = tokens1[math.min(old_start + old_count, #tokens1)]
+
             table.insert(highlights.added, {
-                col = math.floor((old_start - 1) / 2), -- Convert from line-based to char-based
-                end_col = math.floor((old_start - 1 + old_count) / 2),
-                priority = 250,                        -- Higher priority for two-tier highlighting
-                hl_group = 'DiffAdd'                   -- Brighter green for added parts
+                col = start_token.start,
+                end_col = end_token and (end_token.start + end_token.len) or (start_token.start + start_token.len),
+                priority = 250,
+                hl_group = 'RedrawDebugComposed'
             })
         end
 
         -- Highlight changed parts of str2 (removed/red line)
-        if new_count > 0 then
+        if new_count > 0 and tokens2[new_start + 1] then
+            local start_token = tokens2[new_start + 1]
+            local end_token = tokens2[math.min(new_start + new_count, #tokens2)]
+
             table.insert(highlights.removed, {
-                col = math.floor((new_start - 1) / 2), -- Convert from line-based to char-based
-                end_col = math.floor((new_start - 1 + new_count) / 2),
-                priority = 250,                        -- Higher priority for two-tier highlighting
-                hl_group = 'DiffDelete'                -- Brighter red for removed parts
+                col = start_token.start,
+                end_col = end_token and (end_token.start + end_token.len) or (start_token.start + start_token.len),
+                priority = 250,
+                hl_group = 'RedrawDebugRecompose'
             })
         end
     end
 
+    -- if all the word level highlights cover the entire line, do not display any
+    if #highlights.added > 0 then
+        local min_col = math.huge
+        local max_end_col = 0
+        for _, hl in ipairs(highlights.added) do
+            min_col = math.min(min_col, hl.col)
+            max_end_col = math.max(max_end_col, hl.end_col)
+        end
+        if min_col == 0 and max_end_col >= #str1 then
+            highlights.added = {}
+        end
+    end
+
+    if #highlights.removed > 0 then
+        local min_col = math.huge
+        local max_end_col = 0
+        for _, hl in ipairs(highlights.removed) do
+            min_col = math.min(min_col, hl.col)
+            max_end_col = math.max(max_end_col, hl.end_col)
+        end
+        if min_col == 0 and max_end_col >= #str2 then
+            highlights.removed = {}
+        end
+    end
 
     return highlights
 end
