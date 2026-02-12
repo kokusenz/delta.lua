@@ -1,5 +1,7 @@
 local M = {}
 local utils = require('delta.utils')
+local utils_treesitter = require('delta.utils-treesitter')
+local utils_highlighting = require('delta.utils-highlighting')
 
 --- creates a delta buffer and puts it in the current window
 --- @param ref string
@@ -35,7 +37,8 @@ M.git_diff = function(ref, path)
     local buf_id = M.create_formatted_buffer(data)
     M.open_buffer(buf_id)
     -- highlight after opening, so treesitter isn't blocking.
-    M.highlight_git_diff(data, buf_id)
+    M.syntax_highlight_git_diff(data, buf_id)
+    M.highlight_diffs(data, buf_id)
     return buf_id
 end
 
@@ -299,7 +302,7 @@ M.highlight_delta_artifacts = function(diff_data, bufnr)
         return
     end
 
-    --- @type table<number, table<LineHighlight>>
+    --- @type table<number, LineHighlight[]>
     local artifact_highlights = {}
 
     for line_num, content in pairs(diff_data.delta_artifacts) do
@@ -320,7 +323,7 @@ end
 --- highlights each file one by one
 --- @param diff_data DirectoryDiffData
 --- @param bufnr number id of buffer with the diffed contents
-M.highlight_git_diff = function(diff_data, bufnr)
+M.syntax_highlight_git_diff = function(diff_data, bufnr)
     local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
     if vim.v.shell_error ~= 0 then
         vim.notify("Not in a git repository", vim.log.levels.WARN)
@@ -336,8 +339,7 @@ M.highlight_git_diff = function(diff_data, bufnr)
             goto continue
         end
 
-        M.highlight_diff_file(file_data, bufnr, source_path)
-
+        M.syntax_highlight_diff_file(file_data, bufnr, source_path)
         ::continue::
     end
 end
@@ -346,8 +348,7 @@ end
 --- @param file_data FileDiffData
 --- @param bufnr number
 --- @param filepath string Full path to the source file
-M.highlight_diff_file = function(file_data, bufnr, filepath)
-    -- TODO: two tier highlighting
+M.syntax_highlight_diff_file = function(file_data, bufnr, filepath)
     local lang = utils.get_language_from_filename(file_data.new_path)
 
     local lines = utils.read_file_lines(filepath)
@@ -357,9 +358,9 @@ M.highlight_diff_file = function(file_data, bufnr, filepath)
     end
 
     local content = table.concat(lines, '\n')
-    local tokens = utils.get_treesitter_highlight_captures(content, lang)
+    local tokens = utils_treesitter.get_treesitter_highlight_captures(content, lang)
 
-    --- @type table<number, table<LineHighlight>>
+    --- @type table<number, LineHighlight[]>
     local new_highlights = {}
     for _, hunk in ipairs(file_data.hunks) do
         for _, line in ipairs(hunk.lines) do
@@ -368,31 +369,47 @@ M.highlight_diff_file = function(file_data, bufnr, filepath)
             elseif line.line_type == 'added' then
                 local line_length = #line.content
                 local hls = tokens[line.new_line_num - 1] or {}
-                local add_highlight = {
-                    col = 0,
-                    end_col = line_length,
-                    priority = 200,
-                    hl_group = 'DiffAdd'
-                }
+                --local add_highlight = {
+                --    col = 0,
+                --    end_col = line_length,
+                --    priority = 200,
+                --    hl_group = 'DiffAdd'
+                --}
 
-                table.insert(hls, 1, add_highlight)
+                --table.insert(hls, 1, add_highlight)
                 new_highlights[line.formatted_diff_line_num] = hls
             else
                 -- TODO: we can grab the old file, use the old_line_num to grab the tokens for that, to syntax highlight the negative changes
                 -- little benefit though, and pure white or pure red may look more intuitive to most people who are used to that. Delta is pure white.
                 local line_length = #line.content
-                new_highlights[line.formatted_diff_line_num] = {
-                    {
-                        col = 0,
-                        end_col = line_length,
-                        priority = 200,
-                        hl_group = 'DiffDelete'
-                    }
-                }
+                --new_highlights[line.formatted_diff_line_num] = {
+                --    {
+                --        col = 0,
+                --        end_col = line_length,
+                --        priority = 200,
+                --        hl_group = 'DiffDelete'
+                --    }
+                --}
             end
         end
     end
     utils.apply_highlights(bufnr, new_highlights)
+end
+
+--- @param diff_data DirectoryDiffData
+--- @param bufnr number
+M.highlight_diffs = function(diff_data, bufnr)
+    -- TODO: two tier highlighting
+    -- within one proximity window (a bunch of added and deleted lines with no context in between), use a similarity checker (lev distance?)
+    -- if the similarity checker comes back with at least 50% similarity, then it's a candidate for diffing
+    -- vim.text.diff(added_string, deleted_string, { ctxlen = 3, algorithm = 'myers' })
+    -- the following returns the added characters and deleted characters, in the same format as hunks for files
+    -- parse it, maybe using M.get_diff_data_file, then apply a double strength highlight to those added characters
+
+    local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files)
+    --utils.print_table(file_highlights)
+
+    utils.apply_highlights(bufnr, file_highlights)
 end
 
 --- @param bufnr number
@@ -449,3 +466,7 @@ return M
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
 --- @field delta_artifacts table<number, string> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created
+
+
+--- a class that allows the user to decide where to apply two tier highlighting
+--- @class StringDiff
