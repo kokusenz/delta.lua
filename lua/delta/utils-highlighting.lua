@@ -1,11 +1,13 @@
 local M = {}
+local utils = require('delta.utils')
+local utils_treesitter = require('delta.utils-treesitter')
 
 --- @param files table<string, FileDiffData>
 --- @return table<number, LineHighlight[]> diffs first key is filename, second key line number of the diff
 M.get_highlights_directory = function(files)
     local highlights = {}
-    for _, file in pairs(files) do
-        local file_highlights = M.get_highlights_file(file)
+    for filename, file in pairs(files) do
+        local file_highlights = M.get_highlights_file(file, filename)
         for line_number, highlight in pairs(file_highlights) do
             highlights[line_number] = highlight
         end
@@ -14,8 +16,9 @@ M.get_highlights_directory = function(files)
 end
 
 --- @param file FileDiffData
+--- @param filename string
 --- @return table<number, LineHighlight[]> highlights a list of
-M.get_highlights_file = function(file)
+M.get_highlights_file = function(file, filename)
     local highlights = {}
     for _, hunk in ipairs(file.hunks) do
         -- normal line highlighting
@@ -31,7 +34,7 @@ M.get_highlights_file = function(file)
         -- within one hunk, check to see what lines are adjacent to each other that are not context
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
-        local word_highlights = M.get_highlights(adjacent_lines_sets)
+        local word_highlights = M.get_highlights(adjacent_lines_sets, filename)
         for line_number, word_highlight in pairs(word_highlights) do
             local cur_highlights = highlights[line_number] or {}
             for _, highlight in ipairs(word_highlight) do
@@ -54,7 +57,7 @@ M.get_line_highlights = function(hunk)
                 col = 0,
                 end_col = line_length,
                 priority = 200,
-                hl_group = 'DiffAdd'
+                hl_group = 'DeltaDiffAddedLine'
             }
 
             line_highlights[line.formatted_diff_line_num] = { add_highlight }
@@ -64,7 +67,7 @@ M.get_line_highlights = function(hunk)
                 col = 0,
                 end_col = line_length,
                 priority = 200,
-                hl_group = 'DiffDelete'
+                hl_group = 'DeltaDiffRemovedLine'
             }
             line_highlights[line.formatted_diff_line_num] = { remove_highlight }
         end
@@ -73,8 +76,9 @@ M.get_line_highlights = function(hunk)
 end
 
 --- @param adjacent_lines_sets table<number, DiffLine>[]
+--- @param filename string
 --- @return table<number, LineHighlight[]> highlights key: 1-indexed line number of the diff
-M.get_highlights = function(adjacent_lines_sets)
+M.get_highlights = function(adjacent_lines_sets, filename)
     local highlights = {}
     for _, adjacent_lines in ipairs(adjacent_lines_sets) do
         -- sort keys so we can iterate the adjacents ino rder
@@ -141,8 +145,8 @@ M.get_highlights = function(adjacent_lines_sets)
             end
 
             -- if loop runs at least once, max_similarity[2] guaranteed to be non null
-            local diff_highlights = M.get_word_diff_highlights(adjacent_lines[diff_line_num].content,
-                adjacent_lines[max_similarity[2]].content)
+            local diff_highlights = M.get_two_tier_highlights(adjacent_lines[diff_line_num].content,
+                adjacent_lines[max_similarity[2]].content, filename)
             highlights[diff_line_num] = diff_highlights.added
             highlights[max_similarity[2]] = diff_highlights.removed
 
@@ -214,8 +218,8 @@ M.calculate_similarity = function(str1, str2)
         for j = 1, len2 do
             local cost = (str1:sub(i, i) == str2:sub(j, j)) and 0 or 1
             matrix[i][j] = math.min(
-                matrix[i - 1][j] + 1,   -- deletion
-                matrix[i][j - 1] + 1,   -- insertion
+                matrix[i - 1][j] + 1,       -- deletion
+                matrix[i][j - 1] + 1,       -- insertion
                 matrix[i - 1][j - 1] + cost -- substitution
             )
         end
@@ -229,37 +233,34 @@ end
 
 --- @param str1 string (the added/green line)
 --- @param str2 string (the removed/red line)
+--- @param filename string
 --- @return TwoTierHighlights highlights for both strings
-M.get_word_diff_highlights = function(str1, str2)
-    -- insert a \n between every word to force line-based diff to work word-by-word
-    -- Word boundaries: spaces, operators, punctuation (but keep dots within words like foo.bar as one word)
-    local new_lined_str1 = str1:gsub("([%w_]+)([^%w_]?)", "%1\n%2\n")
-    local new_lined_str2 = str2:gsub("([%w_]+)([^%w_]?)", "%1\n%2\n")
+M.get_two_tier_highlights = function(str1, str2, filename)
+    local language = utils.get_language_from_filename(filename)
+    local tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)
+    local tokens_str2 = utils_treesitter.get_treesitter_token_strings(str2, language)
+    -- IF A LANGUAGE LIKE MARKDOWN, WHERE TREESITTER TOKENS AREN"T GREAT, consider pattern matching
+    -- OR figure out how to make treesitter work
+    local formatted_str1 = table.concat(tokens_str1, "\n")
+    local formatted_str2 = table.concat(tokens_str2, "\n")
 
-    -- build token maps to convert line numbers back to character positions
-    --- @return Token[] tokens
-    local function build_token_map(original_str, newlined_str)
-        --- @class Token
-        --- @field start number
-        --- @field len number
-        local tokens = {}
-        local pos = 1
-        for token in newlined_str:gmatch("([^\n]+)") do
-            local token_start = original_str:find(token, pos, true)
-            if token_start then
-                table.insert(tokens, { start = token_start - 1, len = #token }) -- 0-indexed
-                pos = token_start + #token
+    --- @param idx number 1-indexed position of token
+    --- @return number | nil 0-indexed column starting position of token
+    local get_token_position = function(idx, tokens)
+        local running_sum = 0
+        for i, token in ipairs(tokens) do
+            if i == idx then
+                return running_sum
+            else
+                running_sum = running_sum + #token
             end
         end
-        return tokens
+        return nil
     end
 
-    local tokens1 = build_token_map(str1, new_lined_str1)
-    local tokens2 = build_token_map(str2, new_lined_str2)
-
     local diff = vim.text.diff(
-        new_lined_str1,
-        new_lined_str2,
+        formatted_str1,
+        formatted_str2,
         { result_type = 'indices', algorithm = 'myers', ctxlen = 0 })
 
     --- @type TwoTierHighlights
@@ -269,32 +270,29 @@ M.get_word_diff_highlights = function(str1, str2)
     }
 
     for _, change in ipairs(diff) do
-        local old_start, old_count, new_start, new_count = change[1] - 1, change[2], change[3] - 1, change[4]
+        -- 0 indexed
+        local old_start, old_count, new_start, new_count = change[1], change[2], change[3], change[4]
 
         -- highlight changed parts of str1 (added/green line)
         -- convert line numbers to character positions using token map
-        if old_count > 0 and tokens1[old_start + 1] then
-            local start_token = tokens1[old_start + 1]
-            local end_token = tokens1[math.min(old_start + old_count, #tokens1)]
-
+        local token1_position = get_token_position(old_start, tokens_str1)
+        if old_count > 0 and token1_position then
             table.insert(highlights.added, {
-                col = start_token.start,
-                end_col = end_token and (end_token.start + end_token.len) or (start_token.start + start_token.len),
+                col = token1_position,
+                end_col = token1_position + #tokens_str1[old_start],
                 priority = 250,
-                hl_group = 'RedrawDebugComposed'
+                hl_group = 'DeltaDiffAddedWord'
             })
         end
 
         -- Highlight changed parts of str2 (removed/red line)
-        if new_count > 0 and tokens2[new_start + 1] then
-            local start_token = tokens2[new_start + 1]
-            local end_token = tokens2[math.min(new_start + new_count, #tokens2)]
-
+        local token2_position = get_token_position(new_start, tokens_str2)
+        if new_count > 0 and token2_position then
             table.insert(highlights.removed, {
-                col = start_token.start,
-                end_col = end_token and (end_token.start + end_token.len) or (start_token.start + start_token.len),
+                col = token2_position,
+                end_col = token2_position + #tokens_str2[new_start],
                 priority = 250,
-                hl_group = 'RedrawDebugRecompose'
+                hl_group = 'DeltaDiffRemovedWord'
             })
         end
     end

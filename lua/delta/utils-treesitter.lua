@@ -42,8 +42,57 @@ M.get_treesitter_highlight_captures = function(text, lang)
         end
     end)
 
-    --M.print_table(line_highlights)
     return line_highlights
+end
+
+--- @param text string
+--- @param lang string
+--- @return string[]
+M.get_treesitter_token_strings = function(text, lang)
+    local language_tree = vim.treesitter.get_string_parser(text, lang)
+    local tree = language_tree:parse()[1]
+    local node_strings = {}
+
+    local function traverse(node)
+        if node:child_count() == 0 then
+            -- Leaf node - this is an actual token
+            local node_text = vim.treesitter.get_node_text(node, text)
+            if node_text and node_text ~= "" then
+                table.insert(node_strings, node_text)
+            end
+        else
+            -- Non-leaf node - traverse children
+            for child in node:iter_children() do
+                traverse(child)
+            end
+        end
+    end
+
+    traverse(tree:root())
+
+    local strings = {}
+    local cur_node_idx = 1
+    local i = 1
+    while i < #text + 1 do
+        local substr_found = 0
+        for j = i, #text, 1 do
+            local substring = text:sub(i,j)
+            if substring == node_strings[cur_node_idx] then
+                substr_found = j
+                break
+            end
+        end
+        if substr_found ~= 0 then
+            table.insert(strings, node_strings[cur_node_idx])
+            cur_node_idx = cur_node_idx + 1
+            i = substr_found + 1
+        else
+            table.insert(strings, text:sub(i,i))
+            i = i+1
+        end
+    end
+
+    return strings
 end
 
 --- @param str string
