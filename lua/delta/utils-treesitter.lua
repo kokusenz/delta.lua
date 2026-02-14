@@ -59,7 +59,7 @@ M.get_treesitter_token_strings = function(text, lang)
     local function is_free_text_node_type(node_type)
         return node_type == "comment_content"
             or node_type == "string_content"
-            or node_type == "inline"  -- Markdown free text
+            or node_type == "inline" -- Markdown free text
     end
 
     local function traverse(node)
@@ -80,21 +80,31 @@ M.get_treesitter_token_strings = function(text, lang)
             end
         else
             -- non-leaf node - traverse children
-            for child in node:iter_children() do
-                traverse(child)
+            local node_type = node:type()
+
+            if is_free_text_node_type(node_type) then
+                local node_text = vim.treesitter.get_node_text(node, text)
+                for word in node_text:gmatch("%S+") do
+                    table.insert(node_strings, word)
+                end
+            else
+                for child in node:iter_children() do
+                    traverse(child)
+                end
             end
         end
     end
 
     traverse(tree:root())
 
+    -- capture everything not parsed by treesitter (eg. whitespace)
     local strings = {}
     local cur_node_idx = 1
     local i = 1
     while i < #text + 1 do
         local substr_found = 0
         for j = i, #text, 1 do
-            local substring = text:sub(i,j)
+            local substring = text:sub(i, j)
             if substring == node_strings[cur_node_idx] then
                 substr_found = j
                 break
@@ -105,8 +115,8 @@ M.get_treesitter_token_strings = function(text, lang)
             cur_node_idx = cur_node_idx + 1
             i = substr_found + 1
         else
-            table.insert(strings, text:sub(i,i))
-            i = i+1
+            table.insert(strings, text:sub(i, i))
+            i = i + 1
         end
     end
 
