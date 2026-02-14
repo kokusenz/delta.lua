@@ -113,7 +113,6 @@ end
 --- @param diff string the diff for a file (starting from first @@ hunk header)
 --- @return FileDiffData
 M.get_diff_data_file = function(diff)
-    -- TODO double check that I am getting all the lines. I noticed I am missing a line compared to the git diff
     local lines = vim.split(diff, '\n', { plain = true })
 
     --- @type FileDiffData
@@ -132,8 +131,8 @@ M.get_diff_data_file = function(diff)
         diff_line_num = diff_line_num + 1
 
         if line:match('^@@') then
-            -- hunk header: @@ -old_start,old_count +new_start,new_count @@
-            local old_info, new_info = line:match('^@@[%s]+%-([^%s]+)[%s]+%+([^%s]+)[%s]+@@')
+            -- hunk header: @@ -old_start,old_count +new_start,new_count @@ [context]
+            local old_info, new_info, context = line:match('^@@[%s]+%-([^%s]+)[%s]+%+([^%s]+)[%s]+@@(.*)$')
 
             if old_info and new_info then
                 local old_start_str, old_count_str = old_info:match('(%d+),?(%d*)')
@@ -144,13 +143,20 @@ M.get_diff_data_file = function(diff)
                 local new_start = tonumber(new_start_str) or 1
                 local new_count = tonumber(new_count_str) or 1
 
+                -- Trim leading/trailing whitespace from context
+                local trimmed_context = context and context:match('^%s*(.-)%s*$')
+                if trimmed_context == '' then
+                    trimmed_context = nil
+                end
+
                 current_hunk = {
                     lines = {},
                     old_start = old_start,
                     old_count = old_count,
                     new_start = new_start,
                     new_count = new_count,
-                    header = line
+                    header = line,
+                    context = trimmed_context
                 }
 
                 old_line_num = old_start
@@ -232,12 +238,12 @@ M.create_formatted_buffer = function(diff_data)
 
     for filename, file_data in pairs(diff_data.files) do
         table.insert(output_lines, filename)
-        diff_data.delta_artifacts[current_line_num] = filename
+        diff_data.delta_artifacts[current_line_num] = { content = filename, type = "title" }
         line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
         table.insert(output_lines, bar:rep(separator_width))
-        diff_data.delta_artifacts[current_line_num] = bar:rep(separator_width)
+        diff_data.delta_artifacts[current_line_num] = { content = bar:rep(separator_width), type = "fence" }
         line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
@@ -246,23 +252,23 @@ M.create_formatted_buffer = function(diff_data)
         current_line_num = current_line_num + 1
 
         for _, hunk in ipairs(file_data.hunks) do
-            -- TODO delta is able to grab the actual function the code is inside, not just the line number. Not sure how this looks like in oop or larger function signatures
-            local hunk_header = string.format("Line %d ", hunk.new_start)
+            local context = hunk.context and string.format("%s ", hunk.context)
+            local hunk_header = string.format("Line %d: %s", hunk.new_start, context)
             local formatted_hunk_header = hunk_header .. pipe
             local formatted_hunk_header_top = bar:rep(#hunk_header) .. top_corner
             local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
             table.insert(output_lines, formatted_hunk_header_top)
-            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_top
+            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header_top, type = 'fence' }
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header)
-            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header
+            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header, type = 'title' }
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header_bottom)
-            diff_data.delta_artifacts[current_line_num] = formatted_hunk_header_bottom
+            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header_bottom, type = 'fence' }
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
@@ -306,14 +312,14 @@ M.highlight_delta_artifacts = function(diff_data, bufnr)
     --- @type table<number, LineHighlight[]>
     local artifact_highlights = {}
 
-    for line_num, content in pairs(diff_data.delta_artifacts) do
-        local line_length = #content
+    for line_num, artifact in pairs(diff_data.delta_artifacts) do
+        local line_length = #artifact.content
         artifact_highlights[line_num] = {
             {
                 col = 0,
                 end_col = line_length,
                 priority = 150,
-                hl_group = 'Title' -- Blue/gray color typically used for comments
+                hl_group = 'DeltaTitle' -- Blue/gray color typically used for comments
             }
         }
     end
@@ -321,7 +327,7 @@ M.highlight_delta_artifacts = function(diff_data, bufnr)
     utils.apply_highlights(bufnr, artifact_highlights)
 end
 
---- highlights each file one by one
+--- applies treesitter syntax highlights to each file one by one
 --- @param diff_data DirectoryDiffData
 --- @param bufnr number id of buffer with the diffed contents
 M.syntax_highlight_git_diff = function(diff_data, bufnr)
@@ -365,32 +371,8 @@ M.syntax_highlight_diff_file = function(file_data, bufnr, filepath)
     local new_highlights = {}
     for _, hunk in ipairs(file_data.hunks) do
         for _, line in ipairs(hunk.lines) do
-            if line.line_type == 'context' then
+            if line.line_type == 'context' or line.line_type == 'added' then
                 new_highlights[line.formatted_diff_line_num] = tokens[line.new_line_num - 1]
-            elseif line.line_type == 'added' then
-                local line_length = #line.content
-                local hls = tokens[line.new_line_num - 1] or {}
-                --local add_highlight = {
-                --    col = 0,
-                --    end_col = line_length,
-                --    priority = 200,
-                --    hl_group = 'DiffAdd'
-                --}
-
-                --table.insert(hls, 1, add_highlight)
-                new_highlights[line.formatted_diff_line_num] = hls
-            else
-                -- TODO: we can grab the old file, use the old_line_num to grab the tokens for that, to syntax highlight the negative changes
-                -- little benefit though, and pure white or pure red may look more intuitive to most people who are used to that. Delta is pure white.
-                local line_length = #line.content
-                --new_highlights[line.formatted_diff_line_num] = {
-                --    {
-                --        col = 0,
-                --        end_col = line_length,
-                --        priority = 200,
-                --        hl_group = 'DiffDelete'
-                --    }
-                --}
             end
         end
     end
@@ -456,16 +438,25 @@ return M
 --- @field new_start number Starting line number in new file
 --- @field new_count number Number of lines in new file
 --- @field header string The hunk header line (e.g., "@@ -10,5 +12,6 @@")
+--- @field context string|nil Function or context name from hunk header (e.g., "def my_function(")
 
 --- @class FileDiffData
 --- @field hunks Hunk[] Array of hunks for this file
 --- @field old_path string|nil Path to old file (from --- a/...)
 --- @field new_path string|nil Path to new file (from +++ b/...)
 
+-- originally the types were meant to allow different artifacts to have different highlights.
+-- if I want this to be useful, I would need to update my code to identify artifacts by both row and column. 
+-- Would be a big implementation, for little gain.
+-- for little gain.
+--- @class DeltaArtifact
+--- @field content string
+--- @field type "title"|"fence"|
+
 --- A key-value table where key is the filename, and the value is FileData
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
---- @field delta_artifacts table<number, string> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created
+--- @field delta_artifacts table<number, DeltaArtifact> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created
 
 
 --- a class that allows the user to decide where to apply two tier highlighting

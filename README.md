@@ -50,3 +50,6 @@ no write functionality; aka, no completion, no rename
 
 if the diff is not a git diff, and the "before" corresponds to real code (eg. ai diffs that are trying to apply a patch), the intermediary lsp will be able to route requests on the "before" code to the real corresponding code
 
+### optional quality of life stuff, where the effort/refactor doesn't justify the gain, but am amenable to implementing in the future
+1. treesitter syntax highlighting the context headers for each hunk.
+2. treesitter syntax highlighting the deleted lines; actually, non syntax highlighted lines is what delta has. We can easily highlight ours, but for now, I think it would be little gain, and may actually throw off what a user might expect to see.

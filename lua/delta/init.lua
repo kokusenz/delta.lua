@@ -33,6 +33,11 @@ M.initialize_hl_groups = function()
         bg = '#901011', -- brighter red
         default = true
     })
+
+    vim.api.nvim_set_hl(0, 'DeltaTitle', {
+        fg = '#24acd4', -- light blue
+        default = true
+    })
 end
 
 M.run_delta_diff = function()
