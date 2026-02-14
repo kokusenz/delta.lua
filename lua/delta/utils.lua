@@ -13,7 +13,7 @@ M.apply_highlights = function(bufnr, highlights)
                 vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number, hl.col, {
                     end_col = hl.end_col,
                     hl_group = hl.hl_group,
-                    priority = hl.priority
+                    priority = tonumber(hl.priority)
                 })
             end)
 

@@ -128,29 +128,46 @@ M.get_highlights = function(adjacent_lines_sets, filename)
             end
         end
 
-        -- given combinations, a list of potential "matches" for each added line, find the one with the most similarity
+        -- Calculate similarity scores for all possible pairs
+        --- @type {added_line: number, removed_line: number, similarity: number}[]
+        local all_pairs = {}
+
         for diff_line_num, potential_pairs in pairs(combinations) do
-            if #potential_pairs == 0 then
-                goto continue
-            end
-
-            local max_similarity = { 0, nil }
             for _, potential_pair_line_num in ipairs(potential_pairs) do
-                local similarity = M.calculate_similarity(adjacent_lines[diff_line_num].content,
-                    adjacent_lines[potential_pair_line_num].content)
-                if similarity >= max_similarity[1] then
-                    max_similarity[1] = similarity
-                    max_similarity[2] = potential_pair_line_num
-                end
+                local similarity = M.calculate_similarity(
+                    adjacent_lines[diff_line_num].content,
+                    adjacent_lines[potential_pair_line_num].content
+                )
+                table.insert(all_pairs, {
+                    added_line = diff_line_num,
+                    removed_line = potential_pair_line_num,
+                    similarity = similarity
+                })
             end
+        end
 
-            -- if loop runs at least once, max_similarity[2] guaranteed to be non null
-            local diff_highlights = M.get_two_tier_highlights(adjacent_lines[diff_line_num].content,
-                adjacent_lines[max_similarity[2]].content, filename)
-            highlights[diff_line_num] = diff_highlights.added
-            highlights[max_similarity[2]] = diff_highlights.removed
+        -- Sort pairs by similarity (highest first)
+        table.sort(all_pairs, function(a, b)
+            return a.similarity > b.similarity
+        end)
 
-            ::continue::
+        -- Greedily assign pairs, ensuring each line is matched at most once
+        local matched_lines = {}
+        for _, pair in ipairs(all_pairs) do
+            -- If neither line has been matched yet, match them
+            if not matched_lines[pair.added_line] and not matched_lines[pair.removed_line] then
+                local diff_highlights = M.get_two_tier_highlights(
+                    adjacent_lines[pair.added_line].content,
+                    adjacent_lines[pair.removed_line].content,
+                    filename
+                )
+                highlights[pair.added_line] = diff_highlights.added
+                highlights[pair.removed_line] = diff_highlights.removed
+
+                -- Mark both lines as matched
+                matched_lines[pair.added_line] = true
+                matched_lines[pair.removed_line] = true
+            end
         end
     end
     return highlights
