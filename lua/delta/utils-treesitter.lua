@@ -53,15 +53,33 @@ M.get_treesitter_token_strings = function(text, lang)
     local tree = language_tree:parse()[1]
     local node_strings = {}
 
+    --- Check if a node type represents free text that should be split into words
+    --- @param node_type string
+    --- @return boolean
+    local function is_free_text_node_type(node_type)
+        return node_type == "comment_content"
+            or node_type == "string_content"
+            or node_type == "inline"  -- Markdown free text
+    end
+
     local function traverse(node)
         if node:child_count() == 0 then
-            -- Leaf node - this is an actual token
+            -- leaf node
             local node_text = vim.treesitter.get_node_text(node, text)
             if node_text and node_text ~= "" then
-                table.insert(node_strings, node_text)
+                local node_type = node:type()
+
+                if is_free_text_node_type(node_type) then
+                    -- Split comments into words for better diffing
+                    for word in node_text:gmatch("%S+") do
+                        table.insert(node_strings, word)
+                    end
+                else
+                    table.insert(node_strings, node_text)
+                end
             end
         else
-            -- Non-leaf node - traverse children
+            -- non-leaf node - traverse children
             for child in node:iter_children() do
                 traverse(child)
             end

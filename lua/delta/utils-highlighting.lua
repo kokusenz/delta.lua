@@ -294,20 +294,28 @@ M.get_two_tier_highlights = function(str1, str2, filename)
         -- convert line numbers to character positions using token map
         local token1_position = get_token_position(old_start, tokens_str1)
         if old_count > 0 and token1_position then
+            local end_position = token1_position
+            for i = old_start, old_start + old_count - 1 do
+                end_position = end_position + #tokens_str1[i]
+            end
             table.insert(highlights.added, {
                 col = token1_position,
-                end_col = token1_position + #tokens_str1[old_start],
+                end_col = end_position,
                 priority = 250,
                 hl_group = 'DeltaDiffAddedWord'
             })
         end
 
-        -- Highlight changed parts of str2 (removed/red line)
+        -- highlight changed parts of str2 (removed/red line)
         local token2_position = get_token_position(new_start, tokens_str2)
         if new_count > 0 and token2_position then
+            local end_position = token2_position
+            for i = new_start, new_start + new_count - 1 do
+                end_position = end_position + #tokens_str2[i]
+            end
             table.insert(highlights.removed, {
                 col = token2_position,
-                end_col = token2_position + #tokens_str2[new_start],
+                end_col = end_position,
                 priority = 250,
                 hl_group = 'DeltaDiffRemovedWord'
             })
