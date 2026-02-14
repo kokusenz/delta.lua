@@ -2,9 +2,9 @@ local M = {}
 
 --- @param bufnr number
 --- @param highlights table<number, LineHighlight[]>
-M.apply_highlights = function(bufnr, highlights)
-    -- TODO optionally take in the namespace. This way, if you don't specify, highlights are additive. If you do, you can override existing highlights
-    local ns_id = vim.api.nvim_create_namespace("manual_treesitter_highlights")
+--- @param namespace string | nil optional namespace
+M.apply_highlights = function(bufnr, highlights, namespace)
+    local ns_id = vim.api.nvim_create_namespace(namespace or "manual_treesitter_highlights")
 
     for line_number, highlight in pairs(highlights) do
         for _, hl in ipairs(highlight) do

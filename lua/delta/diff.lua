@@ -382,39 +382,27 @@ end
 --- @param diff_data DirectoryDiffData
 --- @param bufnr number
 M.highlight_diffs = function(diff_data, bufnr)
-    -- TODO: two tier highlighting
-    -- within one proximity window (a bunch of added and deleted lines with no context in between), use a similarity checker (lev distance?)
-    -- if the similarity checker comes back with at least 50% similarity, then it's a candidate for diffing
-    -- vim.text.diff(added_string, deleted_string, { ctxlen = 3, algorithm = 'myers' })
-    -- the following returns the added characters and deleted characters, in the same format as hunks for files
-    -- parse it, maybe using M.get_diff_data_file, then apply a double strength highlight to those added characters
-
     local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files)
-
     utils.apply_highlights(bufnr, file_highlights)
 end
 
 --- @param bufnr number
 M.open_buffer = function(bufnr)
     vim.api.nvim_win_set_buf(0, bufnr)
+    local current_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = 0 })
 
-    -- Save the current statuscolumn to restore later
-    local saved_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = 0 })
-
-    -- Set custom statuscolumn for this window
     vim.api.nvim_set_option_value('statuscolumn',
         '%{%v:lua.require("delta.statuscolumn").render(v:lnum)%}',
         { win = 0 }
     )
 
-    -- Restore statuscolumn when leaving the buffer
     vim.api.nvim_create_autocmd('BufLeave', {
         buffer = bufnr,
         once = true,
         callback = function()
-            -- Only restore if the window is still valid
+            -- restore statuscolumn when leaving the buffer
             if vim.api.nvim_win_is_valid(0) then
-                vim.api.nvim_set_option_value('statuscolumn', saved_statuscolumn, { win = 0 })
+                vim.api.nvim_set_option_value('statuscolumn', current_statuscolumn, { win = 0 })
             end
         end
     })
