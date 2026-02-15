@@ -3,7 +3,6 @@ local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
 local utils_highlighting = require('delta.utils-highlighting')
 local config = require('delta.config')
--- TODO investigate bug where green/red highlights disappear if colorschemes are changed
 -- TODO investigate if status col can be colored, such that added lines have green line numbers; removed lines have red
 
 --- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing

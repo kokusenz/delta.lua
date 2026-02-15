@@ -4,13 +4,25 @@ local M = {}
 -- expose functions, expose data; for example, deltaview doesn't want to parse things like it does for delta; just expose DiffData
 -- the one thing I don't want is a modifiable buffer, because that is a recipe for disaster.
 
+-- TODO verify what flags delta has that I want to support. For example, similarity threshold
+
 ---@param opts DeltaOpts
 M.setup = function(opts)
     require('delta.config').setup(opts)
 
-    -- :TestDeltaDiff command
+    -- Initialize highlight groups
     M.initialize_hl_groups()
 
+    -- TODO when writing unit tests, write a test case for when colorschemes change to assert this behavior
+    -- another example test case is that highlights change to light mode when background changes
+    -- Reinitialize highlight groups when colorscheme changes
+    vim.api.nvim_create_autocmd('ColorScheme', {
+        group = vim.api.nvim_create_augroup('DeltaHighlights', { clear = true }),
+        callback = M.initialize_hl_groups,
+        desc = 'Reinitialize Delta highlight groups after colorscheme change'
+    })
+
+    -- :TestDeltaDiff command
     vim.api.nvim_create_user_command('TestDeltaDiff', function(topts)
         local ref = topts.args ~= '' and topts.args or 'HEAD'
         M.run_delta_diff(ref)
@@ -18,32 +30,26 @@ M.setup = function(opts)
 end
 
 M.initialize_hl_groups = function()
-    -- TODO determine if this is the normal way to initialize custom highlight groups
-    -- Define custom highlight groups
-    vim.api.nvim_set_hl(0, 'DeltaDiffAddedLine', {
-        bg = '#002800', -- dark green background
-        default = true
-    })
+    local config = require('delta.config')
 
-    vim.api.nvim_set_hl(0, 'DeltaDiffRemovedLine', {
-        bg = '#3f0001', -- dark red background
-        default = true
-    })
+    -- Detect background (light or dark)
+    local bg = vim.o.background or 'dark'
 
-    vim.api.nvim_set_hl(0, 'DeltaDiffAddedWord', {
-        bg = '#006000', -- brighter green
-        default = true
-    })
+    -- Select appropriate highlight group set
+    local hl_groups = config.options.highlight_groups[bg]
 
-    vim.api.nvim_set_hl(0, 'DeltaDiffRemovedWord', {
-        bg = '#901011', -- brighter red
-        default = true
-    })
+    if not hl_groups then
+        vim.notify(
+            string.format("Delta: No highlight groups defined for background='%s', falling back to 'dark'", bg),
+            vim.log.levels.WARN
+        )
+        hl_groups = config.options.highlight_groups.dark
+    end
 
-    vim.api.nvim_set_hl(0, 'DeltaTitle', {
-        fg = '#24acd4', -- light blue
-        default = true
-    })
+    -- Apply custom highlight groups from config
+    for hl_group_name, hl_def in pairs(hl_groups) do
+        vim.api.nvim_set_hl(0, hl_group_name, hl_def)
+    end
 end
 
 M.run_delta_diff = function(ref)
