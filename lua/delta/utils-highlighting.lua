@@ -1,7 +1,6 @@
 local M = {}
 local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
--- TODO make red and green highlights extend all the way
 
 --- @param files table<string, FileDiffData>
 --- @param opts DeltaOpts | nil Highlighting options (max_line_distance, etc.)
@@ -55,20 +54,22 @@ M.get_line_highlights = function(hunk)
     local line_highlights = {}
     for _, line in ipairs(hunk.lines) do
         if line.line_type == 'added' then
-            local line_length = #line.content
             local add_highlight = {
                 col = 0,
-                end_col = line_length,
+                end_row = line.formatted_diff_line_num + 1,
+                end_col = 0,
+                hl_eol = true,
                 priority = 200,
                 hl_group = 'DeltaDiffAddedLine'
             }
 
             line_highlights[line.formatted_diff_line_num] = { add_highlight }
         elseif line.line_type == 'removed' then
-            local line_length = #line.content
             local remove_highlight = {
                 col = 0,
-                end_col = line_length,
+                end_row = line.formatted_diff_line_num + 1,
+                end_col = 0,
+                hl_eol = true,
                 priority = 200,
                 hl_group = 'DeltaDiffRemovedLine'
             }

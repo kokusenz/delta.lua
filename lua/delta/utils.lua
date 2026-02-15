@@ -11,7 +11,9 @@ M.apply_highlights = function(bufnr, highlights, namespace)
             -- lines are 0 based
             local success, err = pcall(function()
                 vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_number, hl.col, {
+                    end_row = hl.end_row,
                     end_col = hl.end_col,
+                    hl_eol = hl.hl_eol,
                     hl_group = hl.hl_group,
                     priority = tonumber(hl.priority)
                 })
