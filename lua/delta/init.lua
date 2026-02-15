@@ -3,13 +3,18 @@ local M = {}
 -- TODO because this is a module designed for consumption by other lua code, figure out what kind of contract to expose. Kind of like mini.diff. This isn't the type of plugin that's meant to make user commands or keybinds; deltaview.nvim does that.
 -- expose functions, expose data; for example, deltaview doesn't want to parse things like it does for delta; just expose DiffData
 -- the one thing I don't want is a modifiable buffer, because that is a recipe for disaster.
-M.setup = function()
+
+---@param opts DeltaOpts
+M.setup = function(opts)
+    require('delta.config').setup(opts)
+
     -- :TestDeltaDiff command
     M.initialize_hl_groups()
 
-    vim.api.nvim_create_user_command('TestDeltaDiff', function()
-        M.run_delta_diff()
-    end, { desc = "Run delta diff on current buffer" })
+    vim.api.nvim_create_user_command('TestDeltaDiff', function(topts)
+        local ref = topts.args ~= '' and topts.args or 'HEAD'
+        M.run_delta_diff(ref)
+    end, { desc = "Run delta diff on current buffer", nargs = '?' })
 end
 
 M.initialize_hl_groups = function()
@@ -41,9 +46,10 @@ M.initialize_hl_groups = function()
     })
 end
 
-M.run_delta_diff = function()
+M.run_delta_diff = function(ref)
     local diff = require('delta.diff')
 
+    ref = ref or 'HEAD'
     local cur_path
     local ok, expanded = pcall(vim.fn.expand, '%:p')
     if ok and expanded ~= '' then
@@ -51,7 +57,7 @@ M.run_delta_diff = function()
     else
         cur_path = nil
     end
-    diff.git_diff('HEAD', cur_path)
+    diff.git_diff(ref, cur_path)
 end
 
 return M

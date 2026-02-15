@@ -2,6 +2,9 @@ local M = {}
 local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
 local utils_highlighting = require('delta.utils-highlighting')
+local config = require('delta.config')
+-- TODO investigate bug where green/red highlights disappear if colorschemes are changed
+-- TODO investigate if status col can be colored, such that added lines have green line numbers; removed lines have red
 
 --- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing
 --- delta.lua should pretty much purely create the buffer, and provide the other functions as some sort of callbacks
@@ -11,8 +14,9 @@ local utils_highlighting = require('delta.utils-highlighting')
 --- creates a delta buffer based on a git diff and puts it in the current window
 --- @param ref string
 --- @param path string | nil
+--- @param opts DeltaOpts | nil Optional highlighting configuration overrides
 --- @return number | nil bufnr
-M.git_diff = function(ref, path)
+M.git_diff = function(ref, path, opts)
     -- TODO, allow for the passing in of custom flags. Specifically, context (-U) might be useful. Maybe test to assert that other flags won't break
     local cmd = string.format('git diff %s', vim.fn.shellescape(ref))
     if path ~= nil then
@@ -38,14 +42,14 @@ M.git_diff = function(ref, path)
     M.open_buffer(buf_id)
     -- highlight after opening, so treesitter isn't blocking.
     M.syntax_highlight_git_diff(data, buf_id)
-    M.highlight_diffs(data, buf_id)
+    M.highlight_diffs(data, buf_id, opts)
     return buf_id
 end
 
 --- creates a delta buffer based on two texts and puts it in the current window
 --- @param s1 string string 1
 --- @param s2 string string 2
---- @param opts? table { context: number, language: string, filename: string}
+--- @param opts? table { context: number, language: string, filename: string, delta_opts: DeltaOpts }
 M.vim_diff = function(s1, s2, opts)
     opts = opts or {}
     local context = opts.context or 3
@@ -95,7 +99,7 @@ M.vim_diff = function(s1, s2, opts)
     -- highlight after opening, so treesitter isn't blocking.
     M.highlight_delta_artifacts(directory_diff_data, buf_id)
     M.syntax_highlight_diff_file(file_data, buf_id, '')
-    M.highlight_diffs(directory_diff_data, buf_id)
+    M.highlight_diffs(directory_diff_data, buf_id, opts.delta_opts)
     return buf_id
 end
 
@@ -260,6 +264,7 @@ end
 --- @param diff_data DirectoryDiffData
 --- @return number buf_id
 M.create_formatted_buffer = function(diff_data)
+    -- TODO verify that this is generating the files/hunks in the same consistent order as git diff is
     local diff_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value('buftype', 'nofile', { buf = diff_bufnr })
     vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = diff_bufnr })
@@ -432,8 +437,10 @@ end
 
 --- @param diff_data DirectoryDiffData
 --- @param bufnr number
-M.highlight_diffs = function(diff_data, bufnr)
-    local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files)
+--- @param opts DeltaOpts | nil Optional highlighting configuration overrides
+M.highlight_diffs = function(diff_data, bufnr, opts)
+    local highlight_opts = vim.tbl_deep_extend('force', config.options, opts or {})
+    local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files, highlight_opts)
     utils.apply_highlights(bufnr, file_highlights)
 end
 

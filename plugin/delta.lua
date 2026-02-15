@@ -1,1 +1,1 @@
-require('delta').setup()
+require('delta').setup({})

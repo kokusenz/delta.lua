@@ -1,13 +1,15 @@
 local M = {}
 local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
+-- TODO make red and green highlights extend all the way
 
 --- @param files table<string, FileDiffData>
+--- @param opts DeltaOpts | nil Highlighting options (max_line_distance, etc.)
 --- @return table<number, LineHighlight[]> diffs first key is filename, second key line number of the diff
-M.get_highlights_directory = function(files)
+M.get_highlights_directory = function(files, opts)
     local highlights = {}
     for filename, file in pairs(files) do
-        local file_highlights = M.get_highlights_file(file, filename)
+        local file_highlights = M.get_highlights_file(file, filename, opts)
         for line_number, highlight in pairs(file_highlights) do
             highlights[line_number] = highlight
         end
@@ -17,8 +19,9 @@ end
 
 --- @param file FileDiffData
 --- @param filename string
+--- @param opts DeltaOpts | nil Optional configuration overrides
 --- @return table<number, LineHighlight[]> highlights a list of
-M.get_highlights_file = function(file, filename)
+M.get_highlights_file = function(file, filename, opts)
     local highlights = {}
     for _, hunk in ipairs(file.hunks) do
         -- normal line highlighting
@@ -34,7 +37,7 @@ M.get_highlights_file = function(file, filename)
         -- within one hunk, check to see what lines are adjacent to each other that are not context
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
-        local word_highlights = M.get_highlights(adjacent_lines_sets, filename)
+        local word_highlights = M.get_highlights(adjacent_lines_sets, filename, opts)
         for line_number, word_highlight in pairs(word_highlights) do
             local cur_highlights = highlights[line_number] or {}
             for _, highlight in ipairs(word_highlight) do
@@ -77,8 +80,9 @@ end
 
 --- @param adjacent_lines_sets table<number, DiffLine>[]
 --- @param filename string
+--- @param opts DeltaOpts | nil Optional configuration overrides
 --- @return table<number, LineHighlight[]> highlights key: 1-indexed line number of the diff
-M.get_highlights = function(adjacent_lines_sets, filename)
+M.get_highlights = function(adjacent_lines_sets, filename, opts)
     local highlights = {}
     for _, adjacent_lines in ipairs(adjacent_lines_sets) do
         -- sort keys so we can iterate the adjacents ino rder
@@ -153,9 +157,16 @@ M.get_highlights = function(adjacent_lines_sets, filename)
 
         -- Greedily assign pairs, ensuring each line is matched at most once
         local matched_lines = {}
+        opts = opts or {}
+        -- Use opts value or default to 0.6 (delta's default)
+        local max_line_distance = opts.highlighting.max_similarity_threshold or 0.6
         for _, pair in ipairs(all_pairs) do
             -- If neither line has been matched yet, match them
             if not matched_lines[pair.added_line] and not matched_lines[pair.removed_line] then
+                if pair.similarity < max_line_distance then
+                    goto continue
+                end
+
                 local diff_highlights = M.get_two_tier_highlights(
                     adjacent_lines[pair.added_line].content,
                     adjacent_lines[pair.removed_line].content,
@@ -329,31 +340,6 @@ M.get_two_tier_highlights = function(str1, str2, filename)
                 priority = 250,
                 hl_group = 'DeltaDiffRemovedWord'
             })
-        end
-    end
-
-    -- if all the word level highlights cover the entire line, do not display any
-    if #highlights.added > 0 then
-        local min_col = math.huge
-        local max_end_col = 0
-        for _, hl in ipairs(highlights.added) do
-            min_col = math.min(min_col, hl.col)
-            max_end_col = math.max(max_end_col, hl.end_col)
-        end
-        if min_col == 0 and max_end_col >= #str1 then
-            highlights.added = {}
-        end
-    end
-
-    if #highlights.removed > 0 then
-        local min_col = math.huge
-        local max_end_col = 0
-        for _, hl in ipairs(highlights.removed) do
-            min_col = math.min(min_col, hl.col)
-            max_end_col = math.max(max_end_col, hl.end_col)
-        end
-        if min_col == 0 and max_end_col >= #str2 then
-            highlights.removed = {}
         end
     end
 
