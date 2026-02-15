@@ -3,7 +3,6 @@ local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
 local utils_highlighting = require('delta.utils-highlighting')
 local config = require('delta.config')
--- TODO investigate if status col can be colored, such that added lines have green line numbers; removed lines have red
 
 --- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing
 --- delta.lua should pretty much purely create the buffer, and provide the other functions as some sort of callbacks
@@ -273,7 +272,7 @@ M.create_formatted_buffer = function(diff_data)
     local separator_width = utils.get_window_width(0) - 8
 
     -- Line number mapping for statuscolumn
-    --- @type table<number, {old: number|nil, new: number|nil}>
+    --- @type table<number, {old: number|nil, new: number|nil, type: "added"|"removed"|"context"|nil}>
     local line_map = {}
 
     local bar = '─'
@@ -329,7 +328,8 @@ M.create_formatted_buffer = function(diff_data)
                 -- Store old and new line numbers for statuscolumn (1-based indexing)
                 line_map[current_line_num + 1] = {
                     old = line.old_line_num,
-                    new = line.new_line_num
+                    new = line.new_line_num,
+                    type = line.line_type
                 }
 
                 current_line_num = current_line_num + 1

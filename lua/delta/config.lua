@@ -26,6 +26,18 @@ M.defaults = {
             DeltaTitle = {
                 fg = '#24acd4',  -- light blue
                 default = true
+            },
+            DeltaLineNrAdded = {
+                fg = '#008400',  -- darker green for added line numbers
+                default = true
+            },
+            DeltaLineNrRemoved = {
+                fg = '#800202',  -- darker red for removed line numbers
+                default = true
+            },
+            DeltaLineNrContext = {
+                fg = '#444444',  -- darker gray for context line numbers
+                default = true
             }
         },
         light = {
@@ -47,6 +59,18 @@ M.defaults = {
             },
             DeltaTitle = {
                 fg = '#0088aa',  -- darker blue for light backgrounds
+                default = true
+            },
+            DeltaLineNrAdded = {
+                fg = '#008400',  -- darker green for added line numbers
+                default = true
+            },
+            DeltaLineNrRemoved = {
+                fg = '#800202',  -- darker red for removed line numbers
+                default = true
+            },
+            DeltaLineNrContext = {
+                fg = '#444444',  -- darker gray for context line numbers
                 default = true
             }
         }
@@ -78,6 +102,9 @@ return M
 --- @field DeltaDiffAddedWord HighlightGroupDef | nil
 --- @field DeltaDiffRemovedWord HighlightGroupDef | nil
 --- @field DeltaTitle HighlightGroupDef | nil
+--- @field DeltaLineNrAdded HighlightGroupDef | nil
+--- @field DeltaLineNrRemoved HighlightGroupDef | nil
+--- @field DeltaLineNrContext HighlightGroupDef | nil
 
 --- @class HighlightGroupsOpts
 --- @field dark HighlightGroupSet | nil Highlight groups for dark backgrounds
