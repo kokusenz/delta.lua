@@ -161,12 +161,16 @@ M.get_highlights = function(adjacent_lines_sets, filename)
                     adjacent_lines[pair.removed_line].content,
                     filename
                 )
+                if diff_highlights == nil then
+                    goto continue
+                end
                 highlights[pair.added_line] = diff_highlights.added
                 highlights[pair.removed_line] = diff_highlights.removed
 
                 -- Mark both lines as matched
                 matched_lines[pair.added_line] = true
                 matched_lines[pair.removed_line] = true
+                ::continue::
             end
         end
     end
@@ -251,9 +255,14 @@ end
 --- @param str1 string (the added/green line)
 --- @param str2 string (the removed/red line)
 --- @param filename string
---- @return TwoTierHighlights highlights for both strings
+--- @return TwoTierHighlights | nil highlights for both strings
 M.get_two_tier_highlights = function(str1, str2, filename)
     local language = utils.get_language_from_filename(filename)
+    if language == nil then
+        vim.notify('Could not recognize language from: ' .. filename, vim.log.levels.WARN)
+        vim.notify('Two tier highlighting will not be applied.', vim.log.levels.WARN)
+        return
+    end
     local tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)
     local tokens_str2 = utils_treesitter.get_treesitter_token_strings(str2, language)
     -- IF A LANGUAGE LIKE MARKDOWN, WHERE TREESITTER TOKENS AREN"T GREAT, consider pattern matching
@@ -279,6 +288,7 @@ M.get_two_tier_highlights = function(str1, str2, filename)
         formatted_str1,
         formatted_str2,
         { result_type = 'indices', algorithm = 'myers', ctxlen = 0 })
+    --- @cast diff integer[][]
 
     --- @type TwoTierHighlights
     local highlights = {

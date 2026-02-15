@@ -3,14 +3,17 @@ local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils-treesitter')
 local utils_highlighting = require('delta.utils-highlighting')
 
---- creates a delta buffer and puts it in the current window
+--- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing
+--- delta.lua should pretty much purely create the buffer, and provide the other functions as some sort of callbacks
+--- idk, gotta figure out a good interface
+--- another thing to note is that my interface should work with git, two strings, and patch files. Maybe even a file and a string
+---
+--- creates a delta buffer based on a git diff and puts it in the current window
 --- @param ref string
 --- @param path string | nil
 --- @return number | nil bufnr
 M.git_diff = function(ref, path)
-    -- get the output of the git diff, pass into get_hunks
-    --local current_bufnr = vim.api.nvim_get_current_buf()
-
+    -- TODO, allow for the passing in of custom flags. Specifically, context (-U) might be useful. Maybe test to assert that other flags won't break
     local cmd = string.format('git diff %s', vim.fn.shellescape(ref))
     if path ~= nil then
         cmd = string.format(cmd .. ' -- %s', vim.fn.shellescape(path))
@@ -31,9 +34,6 @@ M.git_diff = function(ref, path)
     end
 
     local data = M.get_diff_data_directory(diffstring)
-    -- create formatted buffer should start with a "loading" at the top
-    -- then it should show markdowns of every after file, and every before file, with markdowns
-    -- that will then get parsed
     local buf_id = M.create_formatted_buffer(data)
     M.open_buffer(buf_id)
     -- highlight after opening, so treesitter isn't blocking.
@@ -42,21 +42,61 @@ M.git_diff = function(ref, path)
     return buf_id
 end
 
---- TODO; align this with the interface that mini.diff provides, such that codecompanion/ai tooling can use for their diffs. maybe that isn't using paths; I don't know how ai does it. Maybe the llm generates patches directly, and mini.diff can take patch files as input
---- will always treat f1 as the buffer that should align with the code in your real project; will open a buffer for it as to try to lsp it up
---- @param f1 string path of file 1
---- @param f2 string path of file 2
-M.vim_diff = function(f1, f2)
-    -- TODO currently unfinished
+--- creates a delta buffer based on two texts and puts it in the current window
+--- @param s1 string string 1
+--- @param s2 string string 2
+--- @param opts? table { context: number, language: string, filename: string}
+M.vim_diff = function(s1, s2, opts)
+    opts = opts or {}
+    local context = opts.context or 3
+    local provided_language = opts.language
+    local provided_filename = opts.filename
 
-    -- f1 open buffer, then get the lines content from buffer; maybe io.popen('cat ...').read
-    local old_file = ''
-    -- f2 do not open buffer, just need text contents
-    local new_file = ''
+    -- Determine final filename and check for conflicts
+    local filename
+    if provided_filename then
+        filename = provided_filename
+        -- If both filename and language provided, check for conflict
+        if provided_language then
+            local inferred_language = utils.get_language_from_filename(filename)
+            if inferred_language and inferred_language ~= provided_language then
+                vim.notify(string.format(
+                    "Language conflict: filename '%s' implies language '%s' but opts.language is '%s'",
+                    filename, inferred_language, provided_language
+                ), vim.log.levels.ERROR)
+                return
+            end
+        end
+    elseif provided_language then
+        local extension = utils.get_extension_from_language(provided_language)
+        if extension then
+            filename = "diff." .. extension
+        else
+            vim.notify(string.format("Unknown language '%s', using 'diff' as filename", provided_language), vim.log.levels.WARN)
+            filename = "unspecified_language"
+        end
+    else
+        -- Neither provided, use default
+        filename = "unspecified_language"
+    end
 
-    -- Generate diff using vim.text.diff
-    local vimdiff = vim.text.diff(old_file, new_file, { ctxlen = 3, algorithm = 'myers' })
-    -- launch buffer, same behavior as git_diff from here
+    local diffstring = vim.text.diff(s1, s2, { result_type = 'unified', ctxlen = context, algorithm = 'myers' })
+    --- @cast diffstring string
+    local file_data = M.get_diff_data_file(diffstring)
+    file_data.new_path = filename
+    file_data.old_path = filename
+
+    local files = {}
+    files[filename] = file_data
+    --- @type DirectoryDiffData
+    local directory_diff_data = { files = files, delta_artifacts = {} }
+    local buf_id = M.create_formatted_buffer(directory_diff_data)
+    M.open_buffer(buf_id)
+    -- highlight after opening, so treesitter isn't blocking.
+    M.highlight_delta_artifacts(directory_diff_data, buf_id)
+    M.syntax_highlight_diff_file(file_data, buf_id, '')
+    M.highlight_diffs(directory_diff_data, buf_id)
+    return buf_id
 end
 
 --- @param diff string a diff output
@@ -213,7 +253,10 @@ M.get_diff_data_file = function(diff)
     return file_data
 end
 
---- modifies diff_data as well as returns the buf_id. not happy about it, but better than returning a tuple or something
+-- TODO implement a create_formatted_buffer like function that works on files and doesn't contain artifacts.
+-- hopefully without too much overlap between what create_formatted_buffer already has in code
+
+--- note that this modifies diff data while running.
 --- @param diff_data DirectoryDiffData
 --- @return number buf_id
 M.create_formatted_buffer = function(diff_data)
@@ -253,7 +296,9 @@ M.create_formatted_buffer = function(diff_data)
 
         for _, hunk in ipairs(file_data.hunks) do
             local context = hunk.context and string.format("%s ", hunk.context)
-            local hunk_header = string.format("Line %d: %s", hunk.new_start, context)
+            local hunk_header = context
+                and string.format("Line %d: %s", hunk.new_start, context)
+                or string.format("Line %d ", hunk.new_start)
             local formatted_hunk_header = hunk_header .. pipe
             local formatted_hunk_header_top = bar:rep(#hunk_header) .. top_corner
             local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
@@ -358,6 +403,12 @@ end
 M.syntax_highlight_diff_file = function(file_data, bufnr, filepath)
     local lang = utils.get_language_from_filename(file_data.new_path)
 
+    if lang == nil then
+        vim.notify('Could not recognize language from: ' .. file_data.new_path, vim.log.levels.WARN)
+        vim.notify('Treesitter syntax highlighting will not be applied.', vim.log.levels.WARN)
+        return
+    end
+
     local lines = utils.read_file_lines(filepath)
     if not lines then
         vim.notify('Could not read file: ' .. filepath, vim.log.levels.WARN)
@@ -434,14 +485,13 @@ return M
 --- @field new_path string|nil Path to new file (from +++ b/...)
 
 -- originally the types were meant to allow different artifacts to have different highlights.
--- if I want this to be useful, I would need to update my code to identify artifacts by both row and column. 
+-- if I want this to be useful, I would need to update my code to identify artifacts by both row and column.
 -- Would be a big implementation, for little gain.
 -- for little gain.
 --- @class DeltaArtifact
 --- @field content string
 --- @field type "title"|"fence"|
 
---- A key-value table where key is the filename, and the value is FileData
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
 --- @field delta_artifacts table<number, DeltaArtifact> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created

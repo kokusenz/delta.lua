@@ -13,6 +13,7 @@ M.setup = function()
 end
 
 M.initialize_hl_groups = function()
+    -- TODO determine if this is the normal way to initialize custom highlight groups
     -- Define custom highlight groups
     vim.api.nvim_set_hl(0, 'DeltaDiffAddedLine', {
         bg = '#002800', -- dark green background

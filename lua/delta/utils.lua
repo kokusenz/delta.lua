@@ -30,21 +30,21 @@ end
 
 --- Helper function to determine language identifier from file extension
 --- @param filename string
---- @return string language identifier for markdown code fence
+--- @return string | nil language identifier for markdown code fence
 M.get_language_from_filename = function(filename)
     local extension = filename:match("%.([^%.]+)$")
     if not extension then
-        return ""
+        return nil
     end
 
-    -- map common extensions to markdown language identifiers
+    -- map common extensions to treesitter parser names
     local ext_to_lang = {
         lua = "lua",
         py = "python",
         js = "javascript",
         ts = "typescript",
-        jsx = "jsx",
-        tsx = "tsx",
+        jsx = "javascriptreact",
+        tsx = "typescriptreact",
         rs = "rust",
         go = "go",
         c = "c",
@@ -56,10 +56,10 @@ M.get_language_from_filename = function(filename)
         java = "java",
         rb = "ruby",
         php = "php",
-        cs = "csharp",
+        cs = "c_sharp",
         sh = "bash",
         bash = "bash",
-        zsh = "zsh",
+        zsh = "bash",
         fish = "fish",
         vim = "vim",
         html = "html",
@@ -87,7 +87,55 @@ M.get_language_from_filename = function(filename)
         dart = "dart",
     }
 
-    return ext_to_lang[extension] or extension
+    return ext_to_lang[extension]
+end
+
+--- Get a canonical file extension for a treesitter language
+--- @param language string Treesitter language name (e.g., "c_sharp", "python")
+--- @return string|nil extension File extension without the dot (e.g., "cs", "py")
+M.get_extension_from_language = function(language)
+    -- Map treesitter language names to canonical file extensions
+    local lang_to_ext = {
+        lua = "lua",
+        python = "py",
+        javascript = "js",
+        typescript = "ts",
+        javascriptreact = "jsx",
+        typescriptreact = "tsx",
+        rust = "rs",
+        go = "go",
+        c = "c",
+        cpp = "cpp",
+        java = "java",
+        ruby = "rb",
+        php = "php",
+        c_sharp = "cs",
+        bash = "sh",
+        fish = "fish",
+        vim = "vim",
+        html = "html",
+        css = "css",
+        scss = "scss",
+        sass = "sass",
+        json = "json",
+        xml = "xml",
+        yaml = "yaml",
+        toml = "toml",
+        markdown = "md",
+        sql = "sql",
+        kotlin = "kt",
+        swift = "swift",
+        r = "r",
+        perl = "pl",
+        elixir = "ex",
+        erlang = "erl",
+        haskell = "hs",
+        scala = "scala",
+        clojure = "clj",
+        dart = "dart",
+    }
+
+    return lang_to_ext[language]
 end
 
 M.get_window_width = function(winid)
