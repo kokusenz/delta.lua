@@ -4,17 +4,11 @@ local utils_treesitter = require('delta.utils_treesitter')
 local utils_highlighting = require('delta.utils_highlighting')
 local config = require('delta.config')
 
---- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing
---- delta.lua should pretty much purely create the buffer, and provide the other functions as some sort of callbacks
---- idk, gotta figure out a good interface
---- another thing to note is that my interface should work with git, two strings, and patch files. Maybe even a file and a string
-
 --- creates a delta buffer based on a git diff
 --- @param ref string
 --- @param path string | nil
---- @param opts DeltaOpts | nil Optional highlighting configuration overrides
 --- @return number | nil bufnr
-M.git_diff = function(ref, path, opts)
+M.git_diff = function(ref, path)
     -- TODO, allow for the passing in of custom flags. Specifically, context (-U) might be useful. Maybe test to assert that other flags won't break
     local cmd = string.format('git diff %s', vim.fn.shellescape(ref))
     if path ~= nil then
@@ -37,10 +31,6 @@ M.git_diff = function(ref, path, opts)
 
     local data = M.get_diff_data_directory(diffstring)
     local buf_id = M.create_formatted_buffer(data)
-    M.open_buffer(buf_id)
-    -- highlight after opening, so treesitter isn't blocking.
-    M.syntax_highlight_git_diff(data, buf_id)
-    M.highlight_diffs(data, buf_id, opts)
     return buf_id
 end
 
@@ -48,6 +38,7 @@ end
 --- @param s1 string string 1
 --- @param s2 string string 2
 --- @param opts? table { context: number, language: string, filename: string, delta_opts: DeltaOpts }
+--- @return number | nil bufnr
 M.text_diff = function(s1, s2, opts)
     opts = opts or {}
     local context = opts.context or 3
@@ -91,13 +82,22 @@ M.text_diff = function(s1, s2, opts)
     local files = {}
     files[filename] = file_data
     --- @type DirectoryDiffData
-    local directory_diff_data = { files = files, delta_artifacts = {} }
+    local directory_diff_data = { files = files }
     local buf_id = M.create_formatted_buffer(directory_diff_data)
-    M.open_buffer(buf_id)
-    -- highlight after opening, so treesitter isn't blocking.
-    M.highlight_delta_artifacts(directory_diff_data, buf_id)
-    M.syntax_highlight_diff_file(file_data, buf_id, '')
-    M.highlight_diffs(directory_diff_data, buf_id, opts.delta_opts)
+    return buf_id
+end
+
+--- creates a delta buffer based on a diff string (for example, the text contents of a patch file)
+--- @param diffstring string string
+--- @return number | nil bufnr
+M.diff_diffstring = function(diffstring)
+    if diffstring == "" then
+        vim.notify("diffstring is empty", vim.log.levels.WARN)
+        return
+    end
+
+    local data = M.get_diff_data_directory(diffstring)
+    local buf_id = M.create_formatted_buffer(data)
     return buf_id
 end
 
@@ -109,7 +109,6 @@ M.get_diff_data_directory = function(diff)
     --- @type DirectoryDiffData
     local result = {
         files = {},
-        delta_artifacts = nil
     }
 
     --- @type table<string>
@@ -257,8 +256,10 @@ end
 
 -- TODO implement a create_formatted_buffer like function that works on files and doesn't contain artifacts.
 -- hopefully without too much overlap between what create_formatted_buffer already has in code
+-- maybe can use some of the file level functions we've made that are unused. Need to more clearly distinguish between DirectoryDiffData and FileDiffData in code
+-- for example, text_diff honestly should be file only, not directory level. No need for that top header. Currently using directory because i only have that function built
 
---- note that this modifies diff data while running.
+--- Creates and formats the contents of the delta diff buffer. 
 --- @param diff_data DirectoryDiffData
 --- @return number buf_id
 M.create_formatted_buffer = function(diff_data)
@@ -280,16 +281,17 @@ M.create_formatted_buffer = function(diff_data)
     local top_corner = '┐'
     local bottom_corner = '┘'
 
-    diff_data.delta_artifacts = diff_data.delta_artifacts or {}
+    --- @type DeltaArtifact[]
+    local delta_artifacts = {}
 
     for filename, file_data in pairs(diff_data.files) do
         table.insert(output_lines, filename)
-        diff_data.delta_artifacts[current_line_num] = { content = filename, type = "title" }
+        table.insert(delta_artifacts, { row_number = current_line_num, content = filename, type = "title" })
         line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
         table.insert(output_lines, bar:rep(separator_width))
-        diff_data.delta_artifacts[current_line_num] = { content = bar:rep(separator_width), type = "fence" }
+        table.insert(delta_artifacts, { row_number = current_line_num, content = bar:rep(separator_width), type = "fence" })
         line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
         current_line_num = current_line_num + 1
 
@@ -306,17 +308,17 @@ M.create_formatted_buffer = function(diff_data)
             local formatted_hunk_header_top = bar:rep(#hunk_header) .. top_corner
             local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
             table.insert(output_lines, formatted_hunk_header_top)
-            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header_top, type = 'fence' }
+            table.insert(delta_artifacts, { row_number = current_line_num, content = formatted_hunk_header_top, type = "fence" })
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header)
-            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header, type = 'title' }
+            table.insert(delta_artifacts, { row_number = current_line_num, content = formatted_hunk_header, type = "title" })
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
             table.insert(output_lines, formatted_hunk_header_bottom)
-            diff_data.delta_artifacts[current_line_num] = { content = formatted_hunk_header_bottom, type = 'fence' }
+            table.insert(delta_artifacts, { row_number = current_line_num, content = formatted_hunk_header_bottom, type = "fence" })
             line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
             current_line_num = current_line_num + 1
 
@@ -345,25 +347,26 @@ M.create_formatted_buffer = function(diff_data)
     vim.api.nvim_buf_set_lines(diff_bufnr, 0, -1, false, output_lines)
     vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
 
-    -- Store line mapping in buffer variable for statuscolumn
+    -- delta_line_map is for status column
     vim.b[diff_bufnr].delta_line_map = line_map
+    vim.b[diff_bufnr].delta_files_data = diff_data.files
+    vim.b[diff_bufnr].delta_artifacts = delta_artifacts
 
     return diff_bufnr
 end
 
---- @param diff_data DirectoryDiffData
 --- @param bufnr number
-M.highlight_delta_artifacts = function(diff_data, bufnr)
-    if not diff_data.delta_artifacts then
-        return
-    end
+M.highlight_delta_artifacts = function(bufnr)
+    local delta_artifacts = M.get_delta_artifact_data(bufnr)
+    if (delta_artifacts == nil) then return end
+    --- @cast delta_artifacts DeltaArtifact[]
 
     --- @type table<number, LineHighlight[]>
     local artifact_highlights = {}
 
-    for line_num, artifact in pairs(diff_data.delta_artifacts) do
+    for _, artifact in ipairs(delta_artifacts) do
         local line_length = #artifact.content
-        artifact_highlights[line_num] = {
+        artifact_highlights[artifact.row_number] = {
             {
                 col = 0,
                 end_col = line_length,
@@ -376,17 +379,19 @@ M.highlight_delta_artifacts = function(diff_data, bufnr)
     utils.apply_highlights(bufnr, artifact_highlights)
 end
 
---- applies treesitter syntax highlights to each file one by one
---- @param diff_data DirectoryDiffData
+--- applies treesitter syntax highlights to each file one by one, if inside git
 --- @param bufnr number id of buffer with the diffed contents
-M.syntax_highlight_git_diff = function(diff_data, bufnr)
+M.syntax_highlight_git_diff = function(bufnr)
+    local diff_data = M.get_diff_data(bufnr)
+    if (diff_data == nil) then return end
+    --- @cast diff_data DirectoryDiffData
+ 
     local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
     if vim.v.shell_error ~= 0 then
         vim.notify("Not in a git repository", vim.log.levels.WARN)
         return
     end
 
-    M.highlight_delta_artifacts(diff_data, bufnr)
     for filename, file_data in pairs(diff_data.files) do
         local source_path = git_root .. '/' .. filename
 
@@ -395,7 +400,7 @@ M.syntax_highlight_git_diff = function(diff_data, bufnr)
             goto continue
         end
 
-        M.syntax_highlight_diff_file(file_data, bufnr, source_path)
+        M.syntax_highlight_git_diff_file(file_data, bufnr, source_path)
         ::continue::
     end
 end
@@ -404,7 +409,7 @@ end
 --- @param file_data FileDiffData
 --- @param bufnr number
 --- @param filepath string Full path to the source file
-M.syntax_highlight_diff_file = function(file_data, bufnr, filepath)
+M.syntax_highlight_git_diff_file = function(file_data, bufnr, filepath)
     local lang = utils.get_language_from_filename(file_data.new_path)
 
     if lang == nil then
@@ -434,19 +439,43 @@ M.syntax_highlight_diff_file = function(file_data, bufnr, filepath)
     utils.apply_highlights(bufnr, new_highlights)
 end
 
---- @param diff_data DirectoryDiffData
 --- @param bufnr number
 --- @param opts DeltaOpts | nil Optional highlighting configuration overrides
-M.highlight_diffs = function(diff_data, bufnr, opts)
+M.diff_highlight_diff_directory = function(bufnr, opts)
+    local diff_data = M.get_diff_data(bufnr)
+    if (diff_data == nil) then return end
+    --- @cast diff_data DirectoryDiffData
     local highlight_opts = vim.tbl_deep_extend('force', config.options, opts or {})
     local file_highlights = utils_highlighting.get_highlights_directory(diff_data.files, highlight_opts)
     utils.apply_highlights(bufnr, file_highlights)
 end
 
+--- CURRENTLY UNUSED
+--- @param file_data FileDiffData
+--- @param filename string
 --- @param bufnr number
-M.open_buffer = function(bufnr)
-    vim.api.nvim_win_set_buf(0, bufnr)
-    local current_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = 0 })
+--- @param opts DeltaOpts | nil Optional highlighting configuration overrides
+M.diff_highlight_diff_file = function(file_data, filename, bufnr, opts)
+    local highlight_opts = vim.tbl_deep_extend('force', config.options, opts or {})
+    local file_highlights = utils_highlighting.get_highlights_file(file_data, filename, highlight_opts)
+    utils.apply_highlights(bufnr, file_highlights)
+end
+
+--- @param bufnr number
+--- @param winid number | nil defaults to current window
+M.setup_delta_statuscolumn = function(bufnr, winid)
+    local win = winid or vim.api.nvim_get_current_win()
+
+
+    if vim.api.nvim_win_get_buf(win) ~= bufnr then
+        error(string.format(
+            "Buffer %d must be displayed in window %d before calling setup_delta_statuscolumn. " ..
+            "Please display the buffer first: vim.api.nvim_win_set_buf(%d, %d)",
+            bufnr, winid, win, bufnr
+        ))
+    end
+
+    local current_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = win })
 
     vim.api.nvim_set_option_value('statuscolumn',
         '%{%v:lua.require("delta.statuscolumn").render(v:lnum)%}',
@@ -459,12 +488,37 @@ M.open_buffer = function(bufnr)
         callback = function()
             -- restore statuscolumn when leaving the buffer
             if vim.api.nvim_win_is_valid(0) then
-                vim.api.nvim_set_option_value('statuscolumn', current_statuscolumn, { win = 0 })
+                vim.api.nvim_set_option_value('statuscolumn', current_statuscolumn, { win = win })
             end
         end
     })
 end
 
+--- @param bufnr number
+--- @return DirectoryDiffData | nil
+M.get_diff_data = function(bufnr)
+    local delta_files_data = vim.b[bufnr].delta_files_data
+
+    if delta_files_data == nil then
+        vim.notify("Buffer did not contain delta diff data", vim.log.levels.WARN)
+        return
+    end
+    --- @type DirectoryDiffData
+    return { files = delta_files_data }
+end
+
+--- @param bufnr number
+--- @return DeltaArtifact[] | nil
+M.get_delta_artifact_data = function(bufnr)
+    local delta_artifacts = vim.b[bufnr].delta_artifacts
+
+    if delta_artifacts == nil then
+        vim.notify("Buffer did not contain delta artifact data", vim.log.levels.WARN)
+        return
+    end
+    --- @type DirectoryDiffData
+    return delta_artifacts
+end
 
 return M
 
@@ -495,9 +549,9 @@ return M
 -- Would be a big implementation, for little gain.
 -- for little gain.
 --- @class DeltaArtifact
+--- @field row_number number (0-indexed)
 --- @field content string
 --- @field type "title"|"fence"|
 
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
---- @field delta_artifacts table<number, DeltaArtifact> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created

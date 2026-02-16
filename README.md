@@ -1,55 +1,115 @@
 # delta.lua
 
-# Requirements
-### Core functionality
-Given a diff, output a readonly neovim buffer with diff two tier highlighting, using treesitter and (if possible) lsp highlighting. formatting of hunk headers and such should equal the original delta pager, or at least be close; wiggle room is available for technical constraints
+[delta](https://github.com/dandavison/delta) (git-delta) in neovim, with treesitter syntax highlighting. Exposes granular functions for the steps to create these buffers, so consumers can customize their view experience.
 
-### diffing algorithm stuff
-if using for git, use git diff; else, use vim.text.diff. Use myers algorthm for vim.text.diff, and linematch must be off. consider explicitly setting those for git as well
-if we want consistency, we could use vim.text.diff for git as well, and just use git to get the files and the indexes and stuff. Seems like git diff is able to diff directories, while vim.text.diff cannot. But this can easily be spun up if we can get what files we need to diff.
+![delta.lua screenshot]()
 
-### syntax highlighting
-the approach:
-1. Create a buffer, with formatted diff. create a mapping for where each row and column in the diff corresponds to, in terms of the source
-example: table<{filename, 'new' | 'old', col_delta}, row> 
-2. for each filename + 'new' | 'old' combination, get the treesitter hl_groups WITHOUT creating a new buffer
-3. sit those hl_groups in this sort of mapping
-example: table<(filename, 'new' | 'old'), table<row, {start_col, end_col, hl_group}>>
-4. after each file is parsed, immediately apply those hl_groups to the formatted buffer using the mapping. 
-example: tokens[{filename, 'new'}][row]
+## Why?
 
+TODO write this section
 
-### integrations
-currently Deltaview.nvim uses the delta binary; this should be a drop in substitute, with slight differences in cursor tracking (due to line number and not having to parse them anymore, and instead we can use the buffer itself)
-this should function similarly to mini.diff, such that it can be used for codecompanion ai diffs. Other plugins who wants diffs should be able to use this with one or a couple functions. ai can input a diff language string, and get a buffer back, and choose how to display it. git differs can input their diff language string, get a buffer back, and choose how to display it. 
+## Features
 
-delegation of responsibility; this will handle the creation of the buffer, and the routing of lsp requests. clients will have to specify whether the before or after of their code corresponds to the "real" code in their project, then the lsp intermediary will take requests sent to it and find the lsp provided by the client, then route that request to it. I only need to know the before or after to know if hover is used on text in my buffer, whether i need to route that request or not.
+TODO write this section
 
-a client like deltaview is now primarily responsible for the user experience (it always was lowk); cursor tracking, buffer popovers, file menus, etc.
-note that with git diffs (or i guess diffs in general) can be with multiple files. need to route that properly aswell
+## Requirements
 
-### line numbers
-the original delta pager has after lines, before lines, and both on context lines
-I will be controlling the neovim gutter to have both as well (maybe iwth statuscolumn)
+- Neovim >= 0.9
+- Git (for git diff)
 
-### buffer management
-creates scratch buffers; it is up to the client how they want to display the buffer. 
+## API
 
-### LSP integration
-If the diff is a git diff, the "after" corresponds to real code", an intermediary lsp will be able to route requests from the custom buffer to to the real corresponding code. The LSP functionality I would like to support are
-textDocument/hover 	hover
-textDocument/signatureHelp 	signature_help
-textDocument/definition 	definition
-textDocument/implementation 	implementation
-textDocument/declaration 	declaration
-textDocument/documentSymbol 	document_symbol
-textDocument/typeDefinition 	type_definition
-textDocument/references 	references
+delta.lua is designed as a library for other plugins. It creates diff buffers but does not control display.
 
-no write functionality; aka, no completion, no rename
+### Buffer Creation
 
-if the diff is not a git diff, and the "before" corresponds to real code (eg. ai diffs that are trying to apply a patch), the intermediary lsp will be able to route requests on the "before" code to the real corresponding code
+```lua
+local delta = require('delta')
 
-### optional quality of life stuff, where the effort/refactor doesn't justify the gain, but am amenable to implementing in the future
-1. treesitter syntax highlighting the context headers for each hunk.
-2. treesitter syntax highlighting the deleted lines; actually, non syntax highlighted lines is what delta has. We can easily highlight ours, but for now, I think it would be little gain, and may actually throw off what a user might expect to see.
+-- Git diff
+bufnr = delta.git_diff(ref, path)  -- ref: "HEAD", "main", etc. path: optional file path
+
+-- Text diff
+bufnr = delta.text_diff(s1, s2, opts)  -- opts: { language, filename, context }
+
+-- Patch/diffstring
+bufnr = delta.diff_diffstring(diffstring)
+```
+
+### Highlighting
+
+```lua
+delta.highlight_delta_artifacts(bufnr)         -- Highlight titles/separators
+delta.syntax_highlight_git_diff(bufnr)         -- Treesitter syntax (git only)
+delta.diff_highlight_diff_directory(bufnr, opts)  -- Two-tier diff highlighting
+```
+
+### Window Setup
+
+```lua
+delta.setup_delta_statuscolumn(bufnr, winid)  -- Setup line numbers (call after displaying buffer)
+```
+
+### Typical Usage
+
+```lua
+local delta = require('delta')
+
+-- 1. Create buffer
+local bufnr = delta.git_diff('HEAD')
+
+-- 2. Display buffer (your window/split/float)
+vim.api.nvim_win_set_buf(0, bufnr)
+
+-- 3. Apply highlighting
+delta.highlight_delta_artifacts(bufnr)
+delta.syntax_highlight_git_diff(bufnr)
+delta.diff_highlight_diff_directory(bufnr)
+
+-- 4. Setup statuscolumn
+delta.setup_delta_statuscolumn(bufnr)
+```
+
+See `lua/delta/init.lua` comments for text diff and patch workflows.
+
+## Installation
+
+[vim.pack](https://github.com/neovim/neovim/pull/34009)
+
+```lua
+vim.pack.add({ 'https://github.com/kokusenz/delta.lua.git'})
+```
+
+Or your favorite plugin manager:
+
+```lua
+-- example: vim plug
+Plug('kokusenz/delta.lua')
+```
+
+No setup needed by default. You can configure if you want:
+
+```lua
+require('delta').setup({
+    highlighting = {
+        max_similarity_threshold = 0.4
+    }
+})
+```
+
+The fzf file picker might be available out of the box, depending on how it was installed. If it does not work, you may need [additional setup](https://github.com/junegunn/fzf/blob/master/README-VIM.md) in your neovim config. Try adding the fzf binary to your `&runtimepath`, or installing fzf's vim integration using a package manager.
+
+## Configuration
+
+TODO write this section
+
+## Troubleshooting
+TODO write this section
+
+## Feature Roadmap
+
+TODO write this section
+
+## Contributing
+
+TODO write this section

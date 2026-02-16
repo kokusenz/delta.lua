@@ -3,10 +3,6 @@ local config = require('delta.config')
 local utils_highlighting = require('delta.utils_highlighting')
 local diff = require('delta.diff')
 
--- TODO because this is a module designed for consumption by other lua code, figure out what kind of contract to expose. Kind of like mini.diff. This isn't the type of plugin that's meant to make user commands or keybinds; deltaview.nvim does that.
--- expose functions, expose data; for example, deltaview doesn't want to parse things like it does for delta; just expose DiffData
--- the one thing I don't want is a modifiable buffer, because that is a recipe for disaster.
-
 -- TODO verify what flags delta has that I want to support. For example, similarity threshold
 
 ---@param opts DeltaOpts
@@ -14,14 +10,27 @@ M.setup = function(opts)
     config.setup(opts)
     utils_highlighting.initialize_hl_groups()
 
-    -- :TestDeltaDiff command
+    -- Testing commands - will be removed before 1.0 release
     vim.api.nvim_create_user_command('TestDeltaDiff', function(topts)
         local ref = topts.args ~= '' and topts.args or 'HEAD'
-        M.run_delta_diff(ref)
-    end, { desc = "Run delta diff on current buffer", nargs = '?' })
+        M._test_git_diff(ref)
+    end, { desc = "[TEST ONLY] Run delta git diff on current buffer", nargs = '?' })
+
+    vim.api.nvim_create_user_command('TestDeltaTextDiff', function()
+        M._test_text_diff()
+    end, { desc = "[TEST ONLY] Run delta text diff with mock data" })
 end
 
-M.run_delta_diff = function(ref)
+M.git_diff = diff.git_diff
+M.text_diff = diff.text_diff
+M.diff_diffstring = diff.diff_diffstring
+M.highlight_delta_artifacts = diff.highlight_delta_artifacts
+M.syntax_highlight_git_diff = diff.syntax_highlight_git_diff
+M.diff_highlight_diff_directory = diff.diff_highlight_diff_directory
+M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
+
+--- @param ref string
+M._test_git_diff = function(ref)
     ref = ref or 'HEAD'
     local cur_path
     local ok, expanded = pcall(vim.fn.expand, '%:p')
@@ -30,7 +39,62 @@ M.run_delta_diff = function(ref)
     else
         cur_path = nil
     end
-    diff.git_diff(ref, cur_path)
+
+    local bufnr = M.git_diff(ref, cur_path)
+    if bufnr == nil then
+        return  -- Error already notified
+    end
+
+    vim.api.nvim_win_set_buf(0, bufnr)
+    M.highlight_delta_artifacts(bufnr)
+    M.syntax_highlight_git_diff(bufnr)
+    M.diff_highlight_diff_directory(bufnr)
+    M.setup_delta_statuscolumn(bufnr)
 end
+
+--- Test function for text diff workflow
+--- Typical sequence: text_diff -> display -> highlight_artifacts -> diff_highlight -> statuscolumn
+M._test_text_diff = function()
+    local original = "local x = 1\nlocal y = 2\nlocal z = 3"
+    local modified = "local x = 1\nlocal y = 10\nlocal z = 3"
+
+    local bufnr = M.text_diff(original, modified, {
+        language = 'lua',
+        filename = 'test.lua'
+    })
+    if bufnr == nil then
+        return
+    end
+
+    vim.api.nvim_win_set_buf(0, bufnr)
+    M.highlight_delta_artifacts(bufnr)
+    M.diff_highlight_diff_directory(bufnr)
+    M.setup_delta_statuscolumn(bufnr)
+end
+
+-- Typical usage sequences for library consumers:
+--
+-- Git diff workflow:
+--   1. bufnr = delta.git_diff(ref, path)
+--   2. <display buffer in window>
+--   3. delta.highlight_delta_artifacts(bufnr)
+--   4. delta.syntax_highlight_git_diff(bufnr)
+--   5. delta.diff_highlight_diff_directory(bufnr, opts)
+--   6. delta.setup_delta_statuscolumn(bufnr, winid)
+--
+-- Text diff workflow:
+--   1. bufnr = delta.text_diff(s1, s2, opts)
+--   2. <display buffer in window>
+--   3. delta.highlight_delta_artifacts(bufnr)
+--   4. delta.diff_highlight_diff_directory(bufnr, opts)
+--   5. delta.setup_delta_statuscolumn(bufnr, winid)
+--
+-- Patch/diffstring workflow:
+--   1. bufnr = delta.diff_diffstring(diffstring)
+--   2. <display buffer in window>
+--   3. delta.highlight_delta_artifacts(bufnr)
+--   4. delta.syntax_highlight_git_diff(bufnr)  -- if in git repo
+--   5. delta.diff_highlight_diff_directory(bufnr, opts)
+--   6. delta.setup_delta_statuscolumn(bufnr, winid)
 
 return M
