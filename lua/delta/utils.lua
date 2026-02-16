@@ -192,3 +192,11 @@ M.print_table = function(tbl, indent)
 end
 
 return M
+
+---@class LineHighlight
+---@field col number starting column
+---@field end_col number end column
+---@field priority number priority
+---@field hl_group string highlight group
+---@field end_row? number end row
+---@field hl_eol? boolean

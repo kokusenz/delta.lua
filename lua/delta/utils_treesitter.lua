@@ -142,12 +142,4 @@ M.is_metadata_pattern = function(str)
     return false
 end
 
----@class LineHighlight
----@field col number starting column
----@field end_row number end row
----@field end_col number end column
----@field priority number priority
----@field hl_group string highlight group
----@field hl_eol boolean
-
 return M

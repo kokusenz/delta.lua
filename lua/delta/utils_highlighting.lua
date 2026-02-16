@@ -1,6 +1,43 @@
 local M = {}
 local utils = require('delta.utils')
-local utils_treesitter = require('delta.utils-treesitter')
+local utils_treesitter = require('delta.utils_treesitter')
+
+M.initialize_hl_groups = function()
+    M.setup_hl_groups()
+
+    -- TODO when writing unit tests, write a test case for when colorschemes change to assert this behavior
+    -- another example test case is that highlights change to light mode when background changes
+    -- Reinitialize highlight groups when colorscheme changes
+    vim.api.nvim_create_autocmd('ColorScheme', {
+        group = vim.api.nvim_create_augroup('DeltaHighlights', { clear = true }),
+        callback = M.setup_hl_groups,
+        desc = 'Reinitialize Delta highlight groups after colorscheme change'
+    })
+
+end
+
+M.setup_hl_groups = function()
+    local config = require('delta.config')
+
+    -- Detect background (light or dark)
+    local bg = vim.o.background or 'dark'
+
+    -- Select appropriate highlight group set
+    local hl_groups = config.options.highlight_groups[bg]
+
+    if not hl_groups then
+        vim.notify(
+            string.format("Delta: No highlight groups defined for background='%s', falling back to 'dark'", bg),
+            vim.log.levels.WARN
+        )
+        hl_groups = config.options.highlight_groups.dark
+    end
+
+    -- Apply custom highlight groups from config
+    for hl_group_name, hl_def in pairs(hl_groups) do
+        vim.api.nvim_set_hl(0, hl_group_name, hl_def)
+    end
+end
 
 --- @param files table<string, FileDiffData>
 --- @param opts DeltaOpts | nil Highlighting options (max_line_distance, etc.)

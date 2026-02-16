@@ -1,15 +1,15 @@
 local M = {}
 local utils = require('delta.utils')
-local utils_treesitter = require('delta.utils-treesitter')
-local utils_highlighting = require('delta.utils-highlighting')
+local utils_treesitter = require('delta.utils_treesitter')
+local utils_highlighting = require('delta.utils_highlighting')
 local config = require('delta.config')
 
 --- TODO I shouldn't open the buffer here, because I want deltaview to control the behavior of how the buffer is opened and closing
 --- delta.lua should pretty much purely create the buffer, and provide the other functions as some sort of callbacks
 --- idk, gotta figure out a good interface
 --- another thing to note is that my interface should work with git, two strings, and patch files. Maybe even a file and a string
----
---- creates a delta buffer based on a git diff and puts it in the current window
+
+--- creates a delta buffer based on a git diff
 --- @param ref string
 --- @param path string | nil
 --- @param opts DeltaOpts | nil Optional highlighting configuration overrides
@@ -44,11 +44,11 @@ M.git_diff = function(ref, path, opts)
     return buf_id
 end
 
---- creates a delta buffer based on two texts and puts it in the current window
+--- creates a delta buffer based on two texts
 --- @param s1 string string 1
 --- @param s2 string string 2
 --- @param opts? table { context: number, language: string, filename: string, delta_opts: DeltaOpts }
-M.vim_diff = function(s1, s2, opts)
+M.text_diff = function(s1, s2, opts)
     opts = opts or {}
     local context = opts.context or 3
     local provided_language = opts.language
@@ -501,7 +501,3 @@ return M
 --- @class DirectoryDiffData
 --- @field files table<string, FileDiffData> Map of filename to file diff data
 --- @field delta_artifacts table<number, DeltaArtifact> | nil table of row number (0 indexed) and string content. Only populated after diff buffer is formatted and created
-
-
---- a class that allows the user to decide where to apply two tier highlighting
---- @class StringDiff
