@@ -30,6 +30,7 @@ M.text_diff = diff.text_diff
 M.diff_diffstring = diff.diff_diffstring
 M.highlight_delta_artifacts = diff.highlight_delta_artifacts
 M.syntax_highlight_git_diff = diff.syntax_highlight_git_diff
+M.syntax_highlight_diff_set = diff.syntax_highlight_diff_set
 M.diff_highlight_diff = diff.diff_highlight_diff
 M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
 
@@ -46,7 +47,7 @@ M._test_git_diff = function(ref)
 
     local bufnr = M.git_diff(ref, cur_path)
     if bufnr == nil then
-        return  -- Error already notified
+        return -- Error already notified
     end
 
     vim.api.nvim_win_set_buf(0, bufnr)
@@ -71,6 +72,7 @@ M._test_text_diff = function()
 
     vim.api.nvim_win_set_buf(0, bufnr)
     M.highlight_delta_artifacts(bufnr)
+    M.syntax_highlight_diff_set(bufnr)
     M.diff_highlight_diff(bufnr)
     M.setup_delta_statuscolumn(bufnr)
 end
@@ -87,13 +89,17 @@ M._test_diff_diffstring = function()
         " local w = 4",
     }, "\n")
 
-    local bufnr = M.diff_diffstring(diffstring, {git = false})
+    local bufnr = M.diff_diffstring(diffstring, {
+        git = false,
+        language = 'lua'
+    })
     if bufnr == nil then
         return
     end
 
     vim.api.nvim_win_set_buf(0, bufnr)
     M.highlight_delta_artifacts(bufnr)
+    M.syntax_highlight_diff_set(bufnr)
     M.diff_highlight_diff(bufnr)
     M.setup_delta_statuscolumn(bufnr)
 end
@@ -112,14 +118,15 @@ end
 --   1. bufnr = delta.text_diff(s1, s2, opts)
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
---   4. delta.diff_highlight_diff(bufnr, opts)
---   5. delta.setup_delta_statuscolumn(bufnr, winid)
+--   4. delta.syntax_highlight_diff_set(bufnr)
+--   5. delta.diff_highlight_diff(bufnr, opts)
+--   6. delta.setup_delta_statuscolumn(bufnr, winid)
 --
 -- Patch/diffstring workflow:
 --   1. bufnr = delta.diff_diffstring(diffstring)
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
---   4. delta.syntax_highlight_git_diff(bufnr)  -- if in git repo
+--   4. delta.syntax_highlight_diff_set(bufnr)  -- or syntax_highlight_git_diff if in git repo with new_path available
 --   5. delta.diff_highlight_diff(bufnr, opts)
 --   6. delta.setup_delta_statuscolumn(bufnr, winid)
 

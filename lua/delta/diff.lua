@@ -361,6 +361,20 @@ M.highlight_delta_artifacts = function(bufnr)
     utils.apply_highlights(bufnr, artifact_highlights)
 end
 
+--- applies treesitter syntax highlights by reconstructing after-content from diff_data.
+--- use this for text_diff and diff_diffstring workflows where no source file is available.
+--- @param bufnr number id of buffer with the diffed contents
+M.syntax_highlight_diff_set = function(bufnr)
+    local diff_data_set = M.get_buf_diff_data_set(bufnr)
+    if diff_data_set == nil then return end
+    --- @cast diff_data_set DiffData[]
+
+    for _, diff_data in ipairs(diff_data_set) do
+        local after_content = M.reconstruct_after_content(diff_data)
+        M.syntax_highlight_diff(bufnr, diff_data, after_content)
+    end
+end
+
 --- applies treesitter syntax highlights to each file one by one, if inside git
 --- @param bufnr number id of buffer with the diffed contents
 M.syntax_highlight_git_diff = function(bufnr)
@@ -387,26 +401,51 @@ M.syntax_highlight_git_diff = function(bufnr)
             vim.notify('Could not read file: ' .. source_path, vim.log.levels.WARN)
             return
         end
-        local content = table.concat(lines, '\n')
+        local after_content = table.concat(lines, '\n')
 
-        M.syntax_highlight_diff(bufnr, diff_data, content)
+        M.syntax_highlight_diff(bufnr, diff_data, after_content)
         ::continue::
     end
+end
+
+--- reconstructs the "after" file content from diff_data by collecting context and added lines
+--- at their correct new-file line positions. Lines not present in the diff are left empty.
+--- The resulting string preserves new_line_num row correspondence for treesitter token lookup.
+--- @param diff_data DiffData
+--- @return string
+M.reconstruct_after_content = function(diff_data)
+    local sparse = {}
+    local max_line = 0
+
+    for _, hunk in ipairs(diff_data.hunks) do
+        for _, line in ipairs(hunk.lines) do
+            if (line.line_type == 'added' or line.line_type == 'context') and line.new_line_num then
+                sparse[line.new_line_num] = line.content
+                if line.new_line_num > max_line then
+                    max_line = line.new_line_num
+                end
+            end
+        end
+    end
+
+    local lines = {}
+    for i = 1, max_line do
+        lines[i] = sparse[i] or ''
+    end
+    return table.concat(lines, '\n')
 end
 
 --- highlights a file by getting the treesitter captures on the full, original file
 --- @param bufnr number
 --- @param diff_data DiffData
---- @param source_lines string the full, original text the diff originated from. If from git, it is the source file
-M.syntax_highlight_diff = function(bufnr, diff_data, source_lines)
-    -- TODO source_lines here currently refers to the "after" state. not tested with non git workflow
-    -- should really be allowing both sets of data to be highlighted. 
+--- @param after_content string the full "after" text the diff originated from
+M.syntax_highlight_diff = function(bufnr, diff_data, after_content)
     if diff_data.language == nil then
         vim.notify('Could not recognize language for: ' .. (diff_data.new_path or 'undefined'), vim.log.levels.WARN)
         vim.notify('Treesitter syntax highlighting will not be applied.', vim.log.levels.WARN)
         return
     end
-    local tokens = utils_treesitter.get_treesitter_highlight_captures(source_lines, diff_data.language)
+    local tokens = utils_treesitter.get_treesitter_highlight_captures(after_content, diff_data.language)
 
     --- @type table<number, LineHighlight[]>
     local new_highlights = {}

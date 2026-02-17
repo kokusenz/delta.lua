@@ -1,5 +1,4 @@
 local M = {}
-local utils = require('delta.utils')
 local utils_treesitter = require('delta.utils_treesitter')
 
 M.initialize_hl_groups = function()
