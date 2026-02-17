@@ -30,10 +30,10 @@ local delta = require('delta')
 bufnr = delta.git_diff(ref, path)  -- ref: "HEAD", "main", etc. path: optional file path
 
 -- Text diff
-bufnr = delta.text_diff(s1, s2, opts)  -- opts: { language, filename, context }
+bufnr = delta.text_diff(s1, s2, opts)  -- opts: { language, context }
 
 -- Patch/diffstring
-bufnr = delta.diff_diffstring(diffstring)
+bufnr = delta.diff_diffstring(diffstring, opts)  -- opts: { git, language }
 ```
 
 ### Highlighting
@@ -41,7 +41,7 @@ bufnr = delta.diff_diffstring(diffstring)
 ```lua
 delta.highlight_delta_artifacts(bufnr)         -- Highlight titles/separators
 delta.syntax_highlight_git_diff(bufnr)         -- Treesitter syntax (git only)
-delta.diff_highlight_diff_directory(bufnr, opts)  -- Two-tier diff highlighting
+delta.diff_highlight_diff(bufnr, opts)  -- Two-tier diff highlighting
 ```
 
 ### Window Setup
@@ -64,7 +64,7 @@ vim.api.nvim_win_set_buf(0, bufnr)
 -- 3. Apply highlighting
 delta.highlight_delta_artifacts(bufnr)
 delta.syntax_highlight_git_diff(bufnr)
-delta.diff_highlight_diff_directory(bufnr)
+delta.diff_highlight_diff(bufnr)
 
 -- 4. Setup statuscolumn
 delta.setup_delta_statuscolumn(bufnr)

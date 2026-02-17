@@ -19,6 +19,10 @@ M.setup = function(opts)
     vim.api.nvim_create_user_command('TestDeltaTextDiff', function()
         M._test_text_diff()
     end, { desc = "[TEST ONLY] Run delta text diff with mock data" })
+
+    vim.api.nvim_create_user_command('TestDeltaDiffstring', function()
+        M._test_diff_diffstring()
+    end, { desc = "[TEST ONLY] Run delta diff_diffstring with a hardcoded unified diff" })
 end
 
 M.git_diff = diff.git_diff
@@ -26,7 +30,7 @@ M.text_diff = diff.text_diff
 M.diff_diffstring = diff.diff_diffstring
 M.highlight_delta_artifacts = diff.highlight_delta_artifacts
 M.syntax_highlight_git_diff = diff.syntax_highlight_git_diff
-M.diff_highlight_diff_directory = diff.diff_highlight_diff_directory
+M.diff_highlight_diff = diff.diff_highlight_diff
 M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
 
 --- @param ref string
@@ -48,7 +52,7 @@ M._test_git_diff = function(ref)
     vim.api.nvim_win_set_buf(0, bufnr)
     M.highlight_delta_artifacts(bufnr)
     M.syntax_highlight_git_diff(bufnr)
-    M.diff_highlight_diff_directory(bufnr)
+    M.diff_highlight_diff(bufnr)
     M.setup_delta_statuscolumn(bufnr)
 end
 
@@ -60,7 +64,6 @@ M._test_text_diff = function()
 
     local bufnr = M.text_diff(original, modified, {
         language = 'lua',
-        filename = 'test.lua'
     })
     if bufnr == nil then
         return
@@ -68,7 +71,30 @@ M._test_text_diff = function()
 
     vim.api.nvim_win_set_buf(0, bufnr)
     M.highlight_delta_artifacts(bufnr)
-    M.diff_highlight_diff_directory(bufnr)
+    M.diff_highlight_diff(bufnr)
+    M.setup_delta_statuscolumn(bufnr)
+end
+
+--- Test function for diff_diffstring workflow
+--- Typical sequence: diff_diffstring -> display -> highlight_artifacts -> diff_highlight -> statuscolumn
+M._test_diff_diffstring = function()
+    local diffstring = table.concat({
+        "@@ -1,4 +1,4 @@",
+        " local x = 1",
+        "-local y = 2",
+        "+local y = 10",
+        " local z = 3",
+        " local w = 4",
+    }, "\n")
+
+    local bufnr = M.diff_diffstring(diffstring, {git = false})
+    if bufnr == nil then
+        return
+    end
+
+    vim.api.nvim_win_set_buf(0, bufnr)
+    M.highlight_delta_artifacts(bufnr)
+    M.diff_highlight_diff(bufnr)
     M.setup_delta_statuscolumn(bufnr)
 end
 
@@ -79,14 +105,14 @@ end
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
 --   4. delta.syntax_highlight_git_diff(bufnr)
---   5. delta.diff_highlight_diff_directory(bufnr, opts)
+--   5. delta.diff_highlight_diff(bufnr, opts)
 --   6. delta.setup_delta_statuscolumn(bufnr, winid)
 --
 -- Text diff workflow:
 --   1. bufnr = delta.text_diff(s1, s2, opts)
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
---   4. delta.diff_highlight_diff_directory(bufnr, opts)
+--   4. delta.diff_highlight_diff(bufnr, opts)
 --   5. delta.setup_delta_statuscolumn(bufnr, winid)
 --
 -- Patch/diffstring workflow:
@@ -94,7 +120,7 @@ end
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
 --   4. delta.syntax_highlight_git_diff(bufnr)  -- if in git repo
---   5. delta.diff_highlight_diff_directory(bufnr, opts)
+--   5. delta.diff_highlight_diff(bufnr, opts)
 --   6. delta.setup_delta_statuscolumn(bufnr, winid)
 
 return M

@@ -39,13 +39,13 @@ M.setup_hl_groups = function()
     end
 end
 
---- @param files table<string, FileDiffData>
+--- @param files DiffData[]
 --- @param opts DeltaOpts | nil Highlighting options (max_line_distance, etc.)
 --- @return table<number, LineHighlight[]> diffs first key is filename, second key line number of the diff
-M.get_highlights_directory = function(files, opts)
+M.get_highlights_multiple_files = function(files, opts)
     local highlights = {}
-    for filename, file in pairs(files) do
-        local file_highlights = M.get_highlights_file(file, filename, opts)
+    for _, file_data in pairs(files) do
+        local file_highlights = M.get_highlights_file(file_data, opts)
         for line_number, highlight in pairs(file_highlights) do
             highlights[line_number] = highlight
         end
@@ -53,11 +53,10 @@ M.get_highlights_directory = function(files, opts)
     return highlights
 end
 
---- @param file FileDiffData
---- @param filename string
+--- @param file DiffData
 --- @param opts DeltaOpts | nil Optional configuration overrides
 --- @return table<number, LineHighlight[]> highlights a list of
-M.get_highlights_file = function(file, filename, opts)
+M.get_highlights_file = function(file, opts)
     local highlights = {}
     for _, hunk in ipairs(file.hunks) do
         -- normal line highlighting
@@ -73,7 +72,7 @@ M.get_highlights_file = function(file, filename, opts)
         -- within one hunk, check to see what lines are adjacent to each other that are not context
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
-        local word_highlights = M.get_highlights(adjacent_lines_sets, filename, opts)
+        local word_highlights = M.get_highlights(adjacent_lines_sets, opts, file.language)
         for line_number, word_highlight in pairs(word_highlights) do
             local cur_highlights = highlights[line_number] or {}
             for _, highlight in ipairs(word_highlight) do
@@ -117,10 +116,10 @@ M.get_line_highlights = function(hunk)
 end
 
 --- @param adjacent_lines_sets table<number, DiffLine>[]
---- @param filename string
 --- @param opts DeltaOpts | nil Optional configuration overrides
+--- @param language string | nil
 --- @return table<number, LineHighlight[]> highlights key: 1-indexed line number of the diff
-M.get_highlights = function(adjacent_lines_sets, filename, opts)
+M.get_highlights = function(adjacent_lines_sets, opts, language)
     local highlights = {}
     for _, adjacent_lines in ipairs(adjacent_lines_sets) do
         -- sort keys so we can iterate the adjacents ino rder
@@ -208,7 +207,7 @@ M.get_highlights = function(adjacent_lines_sets, filename, opts)
                 local diff_highlights = M.get_two_tier_highlights(
                     adjacent_lines[pair.added_line].content,
                     adjacent_lines[pair.removed_line].content,
-                    filename
+                    language
                 )
                 if diff_highlights == nil then
                     goto continue
@@ -303,13 +302,11 @@ end
 
 --- @param str1 string (the added/green line)
 --- @param str2 string (the removed/red line)
---- @param filename string
+--- @param language string | nil
 --- @return TwoTierHighlights | nil highlights for both strings
-M.get_two_tier_highlights = function(str1, str2, filename)
-    local language = utils.get_language_from_filename(filename)
+M.get_two_tier_highlights = function(str1, str2, language)
     if language == nil then
-        vim.notify('Could not recognize language from: ' .. filename, vim.log.levels.WARN)
-        vim.notify('Two tier highlighting will not be applied.', vim.log.levels.WARN)
+        vim.notify('Language not provided. Two tier highlighting will not be applied.' , vim.log.levels.WARN)
         return
     end
     local tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)

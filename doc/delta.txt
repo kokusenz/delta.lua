@@ -93,7 +93,6 @@ delta.text_diff({s1}, {s2}, {opts})                          *delta.text_diff*
         {s2}    (string) Modified text
         {opts}  (table|nil) Optional configuration:
                 - language (string): Language for syntax highlighting
-                - filename (string): Filename (infers language if not set)
                 - context (number): Lines of context (default: 3)
 
     Returns: ~
@@ -105,23 +104,31 @@ delta.text_diff({s1}, {s2}, {opts})                          *delta.text_diff*
         local bufnr = delta.text_diff(
             "local x = 1\nlocal y = 2",
             "local x = 1\nlocal y = 10",
-            { language = 'lua', filename = 'test.lua' }
+            { language = 'lua' }
         )
 <
 
-delta.diff_diffstring({diffstring})                    *delta.diff_diffstring*
+delta.diff_diffstring({diffstring}, {opts})            *delta.diff_diffstring*
     Create a diff buffer from a unified diff string (e.g., patch file).
 
     Parameters: ~
         {diffstring}  (string) Unified diff format string
+        {opts}        (table|nil) Optional configuration:
+                      - git (boolean): Whether the string is in git diff format,
+                        i.e. multiple files (default: false)
+                      - language (string): Language for syntax highlighting
 
     Returns: ~
         (number|nil) Buffer number, or nil on error
 
     Example: ~
 >lua
+        -- Single-file unified diff
         local patch = io.open('fix.patch'):read('*a')
-        local bufnr = require('delta').diff_diffstring(patch)
+        local bufnr = require('delta').diff_diffstring(patch, { language = 'lua' })
+
+        -- Multi-file git diff
+        local bufnr = require('delta').diff_diffstring(patch, { git = true })
 <
 
 ------------------------------------------------------------------------------
@@ -147,9 +154,9 @@ delta.syntax_highlight_git_diff({bufnr})      *delta.syntax_highlight_git_diff*
     Note: Only works for git diffs (requires access to source files).
           For text diffs, syntax highlighting is not yet supported.
 
-delta.diff_highlight_diff_directory({bufnr}, {opts})
-                                            *delta.diff_highlight_diff_directory*
+delta.diff_highlight_diff({bufnr}, {opts})          *delta.diff_highlight_diff*
     Apply two-tier diff highlighting (line-level and word-level).
+    Works for both single-file and git diffs.
 
     Parameters: ~
         {bufnr}  (number) Delta buffer number
@@ -159,7 +166,7 @@ delta.diff_highlight_diff_directory({bufnr}, {opts})
     Example: ~
 >lua
         local delta = require('delta')
-        delta.diff_highlight_diff_directory(bufnr, {
+        delta.diff_highlight_diff(bufnr, {
             highlighting = { max_similarity_threshold = 0.4 }
         })
 <
@@ -208,7 +215,7 @@ Git diff workflow:
     -- 3. Apply highlighting
     delta.highlight_delta_artifacts(bufnr)
     delta.syntax_highlight_git_diff(bufnr)
-    delta.diff_highlight_diff_directory(bufnr)
+    delta.diff_highlight_diff(bufnr)
 
     -- 4. Setup statuscolumn
     delta.setup_delta_statuscolumn(bufnr)
@@ -220,12 +227,11 @@ Text diff workflow:
 
     local bufnr = delta.text_diff(original, modified, {
         language = 'python',
-        filename = 'script.py'
     })
 
     vim.api.nvim_win_set_buf(0, bufnr)
     delta.highlight_delta_artifacts(bufnr)
-    delta.diff_highlight_diff_directory(bufnr)
+    delta.diff_highlight_diff(bufnr)
     delta.setup_delta_statuscolumn(bufnr)
 <
 
