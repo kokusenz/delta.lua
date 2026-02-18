@@ -30,10 +30,10 @@ local delta = require('delta')
 bufnr = delta.git_diff(ref, path)  -- ref: "HEAD", "main", etc. path: optional file path
 
 -- Text diff
-bufnr = delta.text_diff(s1, s2, opts)  -- opts: { language, context }
+bufnr = delta.text_diff(s1, s2, language, opts)
 
 -- Patch/diffstring
-bufnr = delta.diff_diffstring(diffstring, opts)  -- opts: { git, language }
+bufnr = delta.patch_diff(diffstring, is_git_diff, language, opts)
 ```
 
 ### Highlighting

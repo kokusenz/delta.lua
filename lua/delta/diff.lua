@@ -7,12 +7,11 @@ local config = require('delta.config')
 --- creates a delta buffer based on a git diff
 --- @param ref string
 --- @param path string | nil
+--- @param opts DeltaOpts | nil
 --- @return number | nil bufnr
-M.git_diff = function(ref, path)
-    -- TODO, allow for the passing in of custom flags. Specifically, context (-U) might be useful. Maybe test to assert that other flags won't break
-    -- most likely will require changes and consistency in all three workflows (text diff, git diff, diff diff)
-    -- see opts param in text workflow, looks like that might be the way to go; just fully implement that
-    local cmd = string.format('git diff %s', vim.fn.shellescape(ref))
+M.git_diff = function(ref, path, opts)
+    local effective = vim.tbl_deep_extend('force', config.options, opts or {})
+    local cmd = string.format('git diff %s%s', utils.build_git_diff_flags(effective), vim.fn.shellescape(ref))
     if path ~= nil then
         cmd = string.format(cmd .. ' -- %s', vim.fn.shellescape(path))
     end
@@ -39,15 +38,15 @@ end
 --- creates a delta buffer based on two texts
 --- @param s1 string string 1
 --- @param s2 string string 2
---- @param opts? table { context: number, language: string, delta_opts: DeltaOpts }
+--- @param language string | nil language for syntax highlighting (e.g. 'lua', 'python')
+--- @param opts DeltaOpts | nil
 --- @return number | nil bufnr
-M.text_diff = function(s1, s2, opts)
-    opts = opts or {}
-    local context = opts.context or 3
+M.text_diff = function(s1, s2, language, opts)
+    local effective = vim.tbl_deep_extend('force', config.options, opts or {})
 
-    local diffstring = vim.text.diff(s1, s2, { result_type = 'unified', ctxlen = context, algorithm = 'myers' })
+    local diffstring = vim.text.diff(s1, s2, { result_type = 'unified', ctxlen = effective.context, algorithm = 'myers' })
     --- @cast diffstring string
-    local file_data = M.get_diff_data(diffstring, opts.language)
+    local file_data = M.get_diff_data(diffstring, language)
 
     local buf_id = M.create_formatted_buffer({ file_data })
     return buf_id
@@ -55,23 +54,23 @@ end
 
 --- creates a delta buffer based on a diff string (for example, the text contents of a patch file)
 --- @param diffstring string
---- @param opts? table { git: boolean, language: string, delta_opts: DeltaOpts }
+--- @param is_git_diff boolean whether the string is in git diff format (with file headers), as opposed to a plain unified diff
+--- @param language string | nil language for syntax highlighting (e.g. 'lua', 'python'). ignored when is_git_diff is true (language is inferred from file path)
+--- @param opts DeltaOpts | nil
 --- @return number | nil bufnr
-M.diff_diffstring = function(diffstring, opts)
+M.patch_diff = function(diffstring, is_git_diff, language, opts)
     if diffstring == "" then
         vim.notify("diffstring is empty", vim.log.levels.WARN)
         return
     end
 
-    opts = opts or {}
-
-    if opts.git then
+    if is_git_diff then
         local data = M.get_diff_data_git(diffstring)
         local buf_id = M.create_formatted_buffer(data)
         return buf_id
     end
 
-    local data = M.get_diff_data(diffstring, opts.language)
+    local data = M.get_diff_data(diffstring, language)
     local buf_id = M.create_formatted_buffer({ data })
     return buf_id
 end
@@ -362,7 +361,7 @@ M.highlight_delta_artifacts = function(bufnr)
 end
 
 --- applies treesitter syntax highlights by reconstructing after-content from diff_data.
---- use this for text_diff and diff_diffstring workflows where no source file is available.
+--- use this for text_diff and patch_diff workflows where no source file is available.
 --- @param bufnr number id of buffer with the diffed contents
 M.syntax_highlight_diff_set = function(bufnr)
     local diff_data_set = M.get_buf_diff_data_set(bufnr)
@@ -441,8 +440,7 @@ end
 --- @param after_content string the full "after" text the diff originated from
 M.syntax_highlight_diff = function(bufnr, diff_data, after_content)
     if diff_data.language == nil then
-        vim.notify('Could not recognize language for: ' .. (diff_data.new_path or 'undefined'), vim.log.levels.WARN)
-        vim.notify('Treesitter syntax highlighting will not be applied.', vim.log.levels.WARN)
+        vim.notify('Language not established for: ' .. (diff_data.new_path or 'undefined') .. '. Treesitter syntax highlighting will not be applied.', vim.log.levels.WARN)
         return
     end
     local tokens = utils_treesitter.get_treesitter_highlight_captures(after_content, diff_data.language)

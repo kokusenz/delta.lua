@@ -20,14 +20,14 @@ M.setup = function(opts)
         M._test_text_diff()
     end, { desc = "[TEST ONLY] Run delta text diff with mock data" })
 
-    vim.api.nvim_create_user_command('TestDeltaDiffstring', function()
-        M._test_diff_diffstring()
-    end, { desc = "[TEST ONLY] Run delta diff_diffstring with a hardcoded unified diff" })
+    vim.api.nvim_create_user_command('TestDeltaPatchDiff', function()
+        M._test_patch_diff()
+    end, { desc = "[TEST ONLY] Run delta patch_diff with a hardcoded unified diff" })
 end
 
 M.git_diff = diff.git_diff
 M.text_diff = diff.text_diff
-M.diff_diffstring = diff.diff_diffstring
+M.patch_diff = diff.patch_diff
 M.highlight_delta_artifacts = diff.highlight_delta_artifacts
 M.syntax_highlight_git_diff = diff.syntax_highlight_git_diff
 M.syntax_highlight_diff_set = diff.syntax_highlight_diff_set
@@ -45,7 +45,7 @@ M._test_git_diff = function(ref)
         cur_path = nil
     end
 
-    local bufnr = M.git_diff(ref, cur_path)
+    local bufnr = M.git_diff(ref, cur_path, {})
     if bufnr == nil then
         return -- Error already notified
     end
@@ -63,9 +63,7 @@ M._test_text_diff = function()
     local original = "local x = 1\nlocal y = 2\nlocal z = 3"
     local modified = "local x = 1\nlocal y = 10\nlocal z = 3"
 
-    local bufnr = M.text_diff(original, modified, {
-        language = 'lua',
-    })
+    local bufnr = M.text_diff(original, modified, 'lua', {})
     if bufnr == nil then
         return
     end
@@ -77,9 +75,9 @@ M._test_text_diff = function()
     M.setup_delta_statuscolumn(bufnr)
 end
 
---- Test function for diff_diffstring workflow
---- Typical sequence: diff_diffstring -> display -> highlight_artifacts -> diff_highlight -> statuscolumn
-M._test_diff_diffstring = function()
+--- Test function for patch_diff workflow
+--- Typical sequence: patch_diff -> display -> highlight_artifacts -> diff_highlight -> statuscolumn
+M._test_patch_diff = function()
     local diffstring = table.concat({
         "@@ -1,4 +1,4 @@",
         " local x = 1",
@@ -89,10 +87,7 @@ M._test_diff_diffstring = function()
         " local w = 4",
     }, "\n")
 
-    local bufnr = M.diff_diffstring(diffstring, {
-        git = false,
-        language = 'lua'
-    })
+    local bufnr = M.patch_diff(diffstring, false, 'lua', {})
     if bufnr == nil then
         return
     end
@@ -123,7 +118,7 @@ end
 --   6. delta.setup_delta_statuscolumn(bufnr, winid)
 --
 -- Patch/diffstring workflow:
---   1. bufnr = delta.diff_diffstring(diffstring)
+--   1. bufnr = delta.patch_diff(diffstring)
 --   2. <display buffer in window>
 --   3. delta.highlight_delta_artifacts(bufnr)
 --   4. delta.syntax_highlight_diff_set(bufnr)  -- or syntax_highlight_git_diff if in git repo with new_path available

@@ -158,6 +158,18 @@ M.get_window_width = function(winid)
     return win_width - gutter_width
 end
 
+--- Builds the git diff CLI flags string from effective opts.
+--- To add a new git diff flag, insert a new entry here.
+--- @param effective DeltaOpts
+--- @return string flags_str ready to interpolate before the ref (e.g. "-U10 ")
+M.build_git_diff_flags = function(effective)
+    local flags = {}
+    if effective.context ~= nil then
+        table.insert(flags, string.format('-U%d', effective.context))
+    end
+    return #flags > 0 and (table.concat(flags, ' ') .. ' ') or ''
+end
+
 --- Read file contents without opening a vim buffer
 --- @param filepath string Full path to the file
 --- @return table|nil lines Array of lines from the file, or nil if error

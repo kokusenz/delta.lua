@@ -69,12 +69,13 @@ MODULE FUNCTIONS                                              *delta-functions*
 ------------------------------------------------------------------------------
 BUFFER CREATION                                       *delta-buffer-creation*
 
-delta.git_diff({ref}, {path})                                 *delta.git_diff*
+delta.git_diff({ref}, {path}, {opts})                         *delta.git_diff*
     Create a diff buffer comparing working tree to a git reference.
 
     Parameters: ~
         {ref}   (string) Git ref to diff against ("HEAD", "main", "abc123")
         {path}  (string|nil) Optional file path to limit diff scope
+        {opts}  (DeltaOpts|nil) Optional configuration overrides
 
     Returns: ~
         (number|nil) Buffer number, or nil on error
@@ -83,17 +84,17 @@ delta.git_diff({ref}, {path})                                 *delta.git_diff*
 >lua
         local bufnr = require('delta').git_diff('HEAD')
         local bufnr = require('delta').git_diff('HEAD~1', 'lua/init.lua')
+        local bufnr = require('delta').git_diff('HEAD', nil, { context = 10 })
 <
 
-delta.text_diff({s1}, {s2}, {opts})                          *delta.text_diff*
+delta.text_diff({s1}, {s2}, {language}, {opts})              *delta.text_diff*
     Create a diff buffer comparing two text strings.
 
     Parameters: ~
-        {s1}    (string) Original text
-        {s2}    (string) Modified text
-        {opts}  (table|nil) Optional configuration:
-                - language (string): Language for syntax highlighting
-                - context (number): Lines of context (default: 3)
+        {s1}        (string) Original text
+        {s2}        (string) Modified text
+        {language}  (string|nil) Language for syntax highlighting (e.g. 'lua', 'python')
+        {opts}      (DeltaOpts|nil) Optional configuration overrides
 
     Returns: ~
         (number|nil) Buffer number, or nil on error
@@ -104,19 +105,20 @@ delta.text_diff({s1}, {s2}, {opts})                          *delta.text_diff*
         local bufnr = delta.text_diff(
             "local x = 1\nlocal y = 2",
             "local x = 1\nlocal y = 10",
-            { language = 'lua' }
+            'lua'
         )
 <
 
-delta.diff_diffstring({diffstring}, {opts})            *delta.diff_diffstring*
-    Create a diff buffer from a unified diff string (e.g., patch file).
+delta.patch_diff({diffstring}, {is_git_diff}, {language}, {opts})  *delta.patch_diff*
+    Create a diff buffer from a unified diff string (e.g., a .patch file).
 
     Parameters: ~
-        {diffstring}  (string) Unified diff format string
-        {opts}        (table|nil) Optional configuration:
-                      - git (boolean): Whether the string is in git diff format,
-                        i.e. multiple files (default: false)
-                      - language (string): Language for syntax highlighting
+        {diffstring}   (string) Unified diff format string
+        {is_git_diff}  (boolean) Whether the string is in git diff format
+                       (with file headers), as opposed to a plain unified diff
+        {language}     (string|nil) Language for syntax highlighting. Ignored
+                       when is_git_diff is true (language inferred from file path)
+        {opts}         (DeltaOpts|nil) Optional configuration overrides
 
     Returns: ~
         (number|nil) Buffer number, or nil on error
@@ -125,10 +127,10 @@ delta.diff_diffstring({diffstring}, {opts})            *delta.diff_diffstring*
 >lua
         -- Single-file unified diff
         local patch = io.open('fix.patch'):read('*a')
-        local bufnr = require('delta').diff_diffstring(patch, { language = 'lua' })
+        local bufnr = require('delta').patch_diff(patch, false, 'lua')
 
         -- Multi-file git diff
-        local bufnr = require('delta').diff_diffstring(patch, { git = true })
+        local bufnr = require('delta').patch_diff(patch, true, nil)
 <
 
 ------------------------------------------------------------------------------
@@ -146,13 +148,19 @@ delta.highlight_delta_artifacts({bufnr})        *delta.highlight_delta_artifacts
     Note: Should be called for all buffer types (git/text/patch).
 
 delta.syntax_highlight_git_diff({bufnr})      *delta.syntax_highlight_git_diff*
-    Apply treesitter syntax highlighting to diff content.
+    Apply treesitter syntax highlighting using source files from the git repo.
+    Use for git_diff buffers.
 
     Parameters: ~
         {bufnr}  (number) Delta buffer number
 
-    Note: Only works for git diffs (requires access to source files).
-          For text diffs, syntax highlighting is not yet supported.
+delta.syntax_highlight_diff_set({bufnr})    *delta.syntax_highlight_diff_set*
+    Apply treesitter syntax highlighting by reconstructing file content from
+    the diff data. Use for text_diff and patch_diff buffers where no source
+    file is available.
+
+    Parameters: ~
+        {bufnr}  (number) Delta buffer number
 
 delta.diff_highlight_diff({bufnr}, {opts})          *delta.diff_highlight_diff*
     Apply two-tier diff highlighting (line-level and word-level).
@@ -225,12 +233,11 @@ Text diff workflow:
 >lua
     local delta = require('delta')
 
-    local bufnr = delta.text_diff(original, modified, {
-        language = 'python',
-    })
+    local bufnr = delta.text_diff(original, modified, 'python')
 
     vim.api.nvim_win_set_buf(0, bufnr)
     delta.highlight_delta_artifacts(bufnr)
+    delta.syntax_highlight_diff_set(bufnr)
     delta.diff_highlight_diff(bufnr)
     delta.setup_delta_statuscolumn(bufnr)
 <

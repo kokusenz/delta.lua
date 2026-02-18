@@ -12,7 +12,6 @@ M.initialize_hl_groups = function()
         callback = M.setup_hl_groups,
         desc = 'Reinitialize Delta highlight groups after colorscheme change'
     })
-
 end
 
 M.setup_hl_groups = function()
@@ -57,6 +56,11 @@ end
 --- @return table<number, LineHighlight[]> highlights a list of
 M.get_highlights_file = function(file, opts)
     local highlights = {}
+    local highlight_two_tiers = true
+    if file.language == nil then
+        vim.notify('Language not established for: ' .. file.new_path .. '. Two tier highlighting will not be applied.', vim.log.levels.WARN)
+        highlight_two_tiers = false
+    end
     for _, hunk in ipairs(file.hunks) do
         -- normal line highlighting
         local line_highlights = M.get_line_highlights(hunk)
@@ -69,6 +73,9 @@ M.get_highlights_file = function(file, opts)
         end
         -- two tier highlighting
         -- within one hunk, check to see what lines are adjacent to each other that are not context
+        if highlight_two_tiers == false then
+            goto continue
+        end
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
         local word_highlights = M.get_highlights(adjacent_lines_sets, opts, file.language)
@@ -79,10 +86,12 @@ M.get_highlights_file = function(file, opts)
             end
             highlights[line_number] = cur_highlights
         end
+        ::continue::
     end
     return highlights
 end
 
+--- get regular line highlights
 --- @param hunk Hunk
 --- @return table<number, LineHighlight[]>
 M.get_line_highlights = function(hunk)
@@ -114,6 +123,7 @@ M.get_line_highlights = function(hunk)
     return line_highlights
 end
 
+--- get two tier highlights for a hunk
 --- @param adjacent_lines_sets table<number, DiffLine>[]
 --- @param opts DeltaOpts | nil Optional configuration overrides
 --- @param language string | nil
@@ -217,6 +227,7 @@ M.get_highlights = function(adjacent_lines_sets, opts, language)
                 -- Mark both lines as matched
                 matched_lines[pair.added_line] = true
                 matched_lines[pair.removed_line] = true
+
                 ::continue::
             end
         end
@@ -304,8 +315,8 @@ end
 --- @param language string | nil
 --- @return TwoTierHighlights | nil highlights for both strings
 M.get_two_tier_highlights = function(str1, str2, language)
+    -- TODO currently doesn't work on txt files. Honestly, probably should; just parse it exactly like markdown? It might just devolve into the lua pattern matching that markdown kinda devolves into anyways. Note the language validation upstream before the two_tier highlight workflow even begins.
     if language == nil then
-        vim.notify('Language not provided. Two tier highlighting will not be applied.' , vim.log.levels.WARN)
         return
     end
     local tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)

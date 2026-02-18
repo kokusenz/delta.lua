@@ -2,6 +2,7 @@ local M = {}
 
 --- @type DeltaOpts
 M.defaults = {
+    context = 3,  -- lines of context around each hunk
     highlighting = {
         max_similarity_threshold = 0.6  -- delta's default threshold for word-level highlighting
     },
@@ -111,5 +112,6 @@ return M
 --- @field light HighlightGroupSet | nil Highlight groups for light backgrounds
 
 --- @class DeltaOpts
+--- @field context number | nil  Lines of context around each hunk. Default 3. git_diff: -U<n>; text_diff: ctxlen.
 --- @field highlighting HighlightingOpts | nil
 --- @field highlight_groups HighlightGroupsOpts | nil
