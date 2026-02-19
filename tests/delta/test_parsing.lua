@@ -182,6 +182,94 @@ T['get_diff_data()']['second hunk starts at its declared line numbers'] = functi
     eq(result.first_new, 10)
 end
 
+-- ─── get_diff_data() properties ─────────────────────────────────────────────
+
+local property_cases = {
+    {
+        name = 'pure context',
+        diff = "@@ -1,3 +1,3 @@\n local a\n local b\n local c",
+    },
+    {
+        name = 'pure addition',
+        diff = "@@ -4,0 +5,3 @@\n+line1\n+line2\n+line3",
+    },
+    {
+        name = 'pure deletion',
+        diff = "@@ -5,3 +4,0 @@\n-line1\n-line2\n-line3",
+    },
+    {
+        name = 'mixed replace',
+        diff = "@@ -1,4 +1,4 @@\n context\n-old line\n+new line\n context2",
+    },
+    {
+        name = 'old line numbers much larger than new',
+        diff = "@@ -100,4 +1,4 @@\n context\n-removed\n+added\n context2",
+    },
+}
+
+-- Checks type/nil consistency for every line in every hunk.
+-- Returns true on success, or an error string on the first violation.
+local type_nil_check = [[(function()
+    local hunks = M.get_diff_data(_G.diff, 'lua').hunks
+    for _, hunk in ipairs(hunks) do
+        for _, line in ipairs(hunk.lines) do
+            if line.line_type == 'added' then
+                if line.new_line_num == nil then return 'added: new_line_num is nil' end
+                if line.old_line_num ~= nil then return 'added: old_line_num should be nil' end
+            elseif line.line_type == 'removed' then
+                if line.old_line_num == nil then return 'removed: old_line_num is nil' end
+                if line.new_line_num ~= nil then return 'removed: new_line_num should be nil' end
+            elseif line.line_type == 'context' then
+                if line.old_line_num == nil then return 'context: old_line_num is nil' end
+                if line.new_line_num == nil then return 'context: new_line_num is nil' end
+            else
+                return 'unknown line_type: ' .. tostring(line.line_type)
+            end
+        end
+    end
+    return true
+end)()]]
+
+-- Checks that old_line_num and new_line_num each advance strictly within a hunk.
+-- Returns true on success, or an error string on the first violation.
+local monotonicity_check = [[(function()
+    local hunks = M.get_diff_data(_G.diff, 'lua').hunks
+    for _, hunk in ipairs(hunks) do
+        local prev_old, prev_new = nil, nil
+        for _, line in ipairs(hunk.lines) do
+            if line.old_line_num ~= nil then
+                if prev_old ~= nil and line.old_line_num <= prev_old then
+                    return 'old_line_num not strictly increasing: ' .. line.old_line_num .. ' after ' .. prev_old
+                end
+                prev_old = line.old_line_num
+            end
+            if line.new_line_num ~= nil then
+                if prev_new ~= nil and line.new_line_num <= prev_new then
+                    return 'new_line_num not strictly increasing: ' .. line.new_line_num .. ' after ' .. prev_new
+                end
+                prev_new = line.new_line_num
+            end
+        end
+    end
+    return true
+end)()]]
+
+T['get_diff_data() properties'] = new_set()
+
+for _, case in ipairs(property_cases) do
+    T['get_diff_data() properties']['type/nil: ' .. case.name] = function()
+        child.lua([[_G.diff = ...]], { case.diff })
+        local result = child.lua_get(type_nil_check)
+        eq(result, true)
+    end
+
+    T['get_diff_data() properties']['monotonicity: ' .. case.name] = function()
+        child.lua([[_G.diff = ...]], { case.diff })
+        local result = child.lua_get(monotonicity_check)
+        eq(result, true)
+    end
+end
+
 -- ─── get_diff_data_git() ─────────────────────────────────────────────────────
 
 T['get_diff_data_git()'] = new_set()
