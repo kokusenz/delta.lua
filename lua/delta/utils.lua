@@ -188,21 +188,6 @@ M.read_file_lines = function(filepath)
     return lines
 end
 
--- helper for test troubleshooting: Recursively print keys and values of a table
-M.print_table = function(tbl, indent)
-    indent = indent or 0
-    local space = string.rep("  ", indent)
-
-    for key, value in pairs(tbl) do
-        if type(value) == "table" then
-            print(space .. tostring(key) .. ":")
-            M.print_table(value, indent + 1)
-        else
-            print(space .. tostring(key) .. ": " .. tostring(value))
-        end
-    end
-end
-
 return M
 
 ---@class LineHighlight
