@@ -76,6 +76,42 @@ local new_file_git_diff = table.concat({
     "+local y = 2",
 }, "\n")
 
+local git_diff_artifacts_in_content_git_diff_deleted = table.concat({
+    "diff --git a/foo.lua b/foo.lua",
+    "index abc1234..def5678 100644",
+    "--- a/foo.lua",
+    "+++ b/foo.lua",
+    "@@ -1,3 +1,3 @@",
+    " local x = 1",
+    "-local y = 2",
+    "+local y = 10",
+    " local z = 3",
+    "@@ -10,3 +10,3 @@",
+    " local a = 1",
+    "--- this is a lua comment, I will delete",
+    "-local b = 2",
+    "+local b = 20",
+    " local c = 3",
+}, "\n")
+
+local git_diff_artifacts_in_content_git_diff_added = table.concat({
+    "diff --git a/foo.lua b/foo.lua",
+    "index abc1234..def5678 100644",
+    "--- a/foo.lua",
+    "+++ b/foo.lua",
+    "@@ -1,3 +1,3 @@",
+    " local x = 1",
+    "-local y = 2",
+    "+local y = 10",
+    " local z = 3",
+    "@@ -10,3 +10,3 @@",
+    " local a = 1",
+    "-local b = 2",
+    "+++ this is a lua comment I am now adding",
+    "+local b = 20",
+    " local c = 3",
+}, "\n")
+
 -- ─── Test suite ──────────────────────────────────────────────────────────────
 
 -- Note: child.lua_get(expr) prepends 'return' to expr before executing.
@@ -205,6 +241,14 @@ local property_cases = {
         name = 'old line numbers much larger than new',
         diff = "@@ -100,4 +1,4 @@\n context\n-removed\n+added\n context2",
     },
+    {
+        name = 'lines that start with minus but arent deleted',
+        diff = "@@ -5,3 +4,0 @@\n -line1\n-line2\n line3",
+    },
+    {
+        name = 'lines that start with a plus but arent added',
+        diff = "@@ -5,3 +4,0 @@\n +line1\n-line2\n line3",
+    },
 }
 
 -- Checks type/nil consistency for every line in every hunk.
@@ -254,6 +298,36 @@ local monotonicity_check = [[(function()
     return true
 end)()]]
 
+-- Checks that a line of code that starts with a - or a plus will not be processed as a deleted line in the diff
+local false_positive_check = [[(function()
+    local text_lines = vim.split(_G.diff, '\n', { plain = true })
+    local lines_that_should_be_context = {}
+    for _, line in ipairs(text_lines) do
+        local chars = vim.split(line, '')
+        if chars[1] == ' ' then
+            table.insert(lines_that_should_be_context, line)
+        end
+    end
+
+    local hunks = M.get_diff_data(_G.diff, 'lua').hunks
+    local result = false
+    -- we should expect every context line earlier to be listed as context
+    for _, context_line in ipairs(lines_that_should_be_context) do
+        local found = false
+        for _, hunk in ipairs(hunks) do
+            for _, line in ipairs(hunk.lines) do
+                if line.line_type == 'context' and line.content == context_line:sub(2) then
+                    found = true
+                end
+            end
+        end
+        if found == false then
+            return false
+        end
+    end
+    return true
+end)()]]
+
 T['get_diff_data() properties'] = new_set()
 
 for _, case in ipairs(property_cases) do
@@ -266,6 +340,12 @@ for _, case in ipairs(property_cases) do
     T['get_diff_data() properties']['monotonicity: ' .. case.name] = function()
         child.lua([[_G.diff = ...]], { case.diff })
         local result = child.lua_get(monotonicity_check)
+        eq(result, true)
+    end
+
+    T['get_diff_data() properties']['false positive: ' .. case.name] = function()
+        child.lua([[_G.diff = ...]], { case.diff })
+        local result = child.lua_get(false_positive_check)
         eq(result, true)
     end
 end
@@ -325,6 +405,44 @@ T['get_diff_data_git()']['handles new file (from /dev/null)'] = function()
     end)()]])
     eq(result.new_path, 'new.lua')
     eq(result.line_count, 2)
+end
+
+T['get_diff_data_git()']['triple minus outside of a hunk header will be processed as a real line'] = function()
+    child.lua([[_G.diff = ... ]], { git_diff_artifacts_in_content_git_diff_deleted })
+    local result = child.lua_get([[(function()
+        return M.get_diff_data_git(_G.diff)
+    end)()]])
+    local found = false
+    for _, diff_data in ipairs(result) do
+        for _, hunk in ipairs(diff_data.hunks) do
+            for _, line in ipairs(hunk.lines) do
+                -- expect this to be deleted
+                if line.new_line_num == nil and line.line_type == 'removed' and line.content == '-- this is a lua comment, I will delete' then
+                    found = true
+                end
+            end
+        end
+    end
+    eq(found, true)
+end
+
+T['get_diff_data_git()']['triple plus outside of a hunk header will be processed as a real line'] = function()
+    child.lua([[_G.diff = ... ]], { git_diff_artifacts_in_content_git_diff_added })
+    local result = child.lua_get([[(function()
+        return M.get_diff_data_git(_G.diff)
+    end)()]])
+    local found = false
+    for _, diff_data in ipairs(result) do
+        for _, hunk in ipairs(diff_data.hunks) do
+            for _, line in ipairs(hunk.lines) do
+                -- expect this to be added
+                if line.old_line_num == nil and line.line_type == 'added' and line.content == '++ this is a lua comment I am now adding' then
+                    found = true
+                end
+            end
+        end
+    end
+    eq(found, true)
 end
 
 -- ─── reconstruct_after_content() ─────────────────────────────────────────────

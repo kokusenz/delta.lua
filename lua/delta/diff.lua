@@ -206,23 +206,25 @@ M.get_diff_data_git = function(diff)
         end
     end
 
-    for _, line in ipairs(lines) do
-        if line:match('^diff %-%-git') then
+    local i = 1
+    while i <= #lines do
+        if lines[i]:match('^diff %-%-git') then
             -- new file starting: calculate the diff for the old file
             finalize_current_file(current_file_lines)
             current_file_lines = {}
-            current_old_path = nil
-            current_new_path = nil
-        elseif line:match('^%-%-%-') then
-            -- file header: --- a/path/to/file or --- /dev/null
-            current_old_path = line:match('^%-%-%-[%s]+[ab]/(.+)$') or line:match('^%-%-%-[%s]+/dev/null$')
-        elseif line:match('^%+%+%+') then
-            -- file header: +++ b/path/to/file or +++ /dev/null
-            current_new_path = line:match('^%+%+%+[%s]+[ab]/(.+)$') or line:match('^%+%+%+[%s]+/dev/null$')
-        elseif line:match('^index ') then
-            -- skip git metadata line: index hash1..hash2 mode
+            local j = i
+            while j <= #lines and not lines[j]:match('^%-%-%-') and not lines[j + 1]:match('^%+%+%+') do
+                j = j + 1
+            end
+            current_old_path = lines[j]:match('^%-%-%-[%s]+[ab]/(.+)$') or lines[j]:match(
+                '^%-%-%-[%s]+/dev/null$')
+            current_new_path = lines[j + 1]:match('^%+%+%+[%s]+[ab]/(.+)$') or lines[j + 1]:match(
+                '^%+%+%+[%s]+/dev/null$')
+            i = j + 2
         else
-            table.insert(current_file_lines, line)
+            -- normal lines of code
+            table.insert(current_file_lines, lines[i])
+            i = i + 1
         end
     end
 
@@ -440,7 +442,10 @@ end
 --- @param after_content string the full "after" text the diff originated from
 M.syntax_highlight_diff = function(bufnr, diff_data, after_content)
     if diff_data.language == nil then
-        vim.notify('Language not established for: ' .. (diff_data.new_path or 'undefined') .. '. Treesitter syntax highlighting will not be applied.', vim.log.levels.WARN)
+        vim.notify(
+            'Language not established for: ' ..
+            (diff_data.new_path or 'undefined') .. '. Treesitter syntax highlighting will not be applied.',
+            vim.log.levels.WARN)
         return
     end
     local tokens = utils_treesitter.get_treesitter_highlight_captures(after_content, diff_data.language)

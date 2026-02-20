@@ -33,7 +33,7 @@ M._test_git_diff = function(ref)
         cur_path = nil
     end
 
-    local bufnr = M.git_diff(ref, cur_path, {})
+    local bufnr = M.git_diff(ref, nil, {})
     if bufnr == nil then
         return -- Error already notified
     end
@@ -47,8 +47,10 @@ end
 
 --- Test function for text diff workflow. This is a typical sequence.
 M._test_text_diff = function()
-    local original = "local x = 1\nlocal y = 2\nlocal z = 3"
-    local modified = "local x = 1\nlocal y = 10\nlocal z = 3"
+    local original =
+    "local x = 1\nlocal y = 2\nlocal z = 3\n-- a comment\n-- a second comment\n-- a third comment\n-- a fourth comment\n-- a fourth comment\n-- a fifth comment\n-- a sixth comment\nlocal l = 'original'"
+    local modified =
+    "local x = 1\nlocal y = 10\nlocal z = 3\n-- a comment\n-- a second comment\n-- a third comment\n-- a fourth comment\n-- a fourth comment\n-- a fifth comment\n-- a sixth comment\nlocal l = 'new'"
 
     local bufnr = M.text_diff(original, modified, 'lua', {})
     if bufnr == nil then
