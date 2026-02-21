@@ -18,6 +18,9 @@ M.syntax_highlight_git_diff = diff.syntax_highlight_git_diff
 M.syntax_highlight_diff_set = diff.syntax_highlight_diff_set
 M.diff_highlight_diff = diff.diff_highlight_diff
 M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
+M.parse = {}
+M.parse.get_diff_data_git = diff.get_diff_data_git
+M.parse.get_diff_data = diff.get_diff_data
 
 -- Example Usages of Api
 
