@@ -1,3 +1,4 @@
+---@class Delta
 local M = {}
 local config = require('delta.config')
 local utils_highlighting = require('delta.utils_highlighting')
@@ -19,9 +20,11 @@ M.syntax_highlight_diff_set = diff.syntax_highlight_diff_set
 M.diff_highlight_diff = diff.diff_highlight_diff
 M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
 
-M.parse = {}
-M.parse.get_diff_data_git = diff.get_diff_data_git
-M.parse.get_diff_data = diff.get_diff_data
+---@class DeltaParse
+local parse = {}
+parse.get_diff_data_git = diff.get_diff_data_git
+parse.get_diff_data = diff.get_diff_data
+M.parse = parse
 
 -- Example Usages of Api
 
@@ -91,6 +94,6 @@ M._test_patch_diff = function()
     M.setup_delta_statuscolumn(bufnr)
 end
 
--- TODO update documentation explaining how to configure lua_ls to read this global variable, and to use Delta when using this api.
+---@type Delta
 _G.Delta = M
 return M

@@ -19,21 +19,49 @@ TODO write this section
 
 ## API
 
-delta.lua is designed as a library for other plugins. It creates diff buffers but does not control display.
+delta.lua is designed as a library for other plugins. It creates diff buffers, and allows other modules to control the behavior of how the buffers are displayed.
 
-### Buffer Creation
+### Getting Started
+
+`Delta` is defined as a global variable with all the main functions. It is equivalent to `require('delta')`.
+To have your lua language server (lua_ls) show the interface for easier development, add the following to the `on_init` section of your lsp config. If you are using nvim-lsp-config, your configuration should look something like this. I recommend copying the recommend settings from [config.md](https://github.com/neovim/nvim-lspconfig/blob/master/doc/configs.md#lua_ls) from nvim-lspconfig, and adding my modification.
 
 ```lua
-local delta = require('delta')
+vim.lsp.config('lua_ls', {
+  on_init = function(client)
+    -- ...
+    client.config.settings.Lua = vim.tbl_deep_extend('force', client.config.settings.Lua, {
+      runtime = {
+        -- ...
+      },
+      workspace = {
+        -- ...
+        library = vim.list_extend( -- modification starts with vim.list_extend
+            { vim.env.VIMRUNTIME },
+            vim.api.nvim_get_runtime_file('lua/delta', true) -- this allows retrieval of delta annotations for easier development
+        )
+      },
+    })
+  end
+})
 
+vim.lsp.enable({'lua_ls'})
+```
+
+### Buffer Creation
+The following functions created formatted text files without any highlighting
+The data of what is an added line, what is a deleted line, and what is a context line is not visible. That data is stored as a vim buffer variable, `vim.b[bufnr].delta_diff_data_set`.
+
+TODO update more documentation down here, related to opts
+```lua
 -- Git diff
-bufnr = delta.git_diff(ref, path)  -- ref: "HEAD", "main", etc. path: optional file path
+bufnr = Delta.git_diff(ref, path)  -- ref: "HEAD", "main", etc. path: optional file path
 
 -- Text diff
-bufnr = delta.text_diff(s1, s2, language, opts)
+bufnr = Delta.text_diff(s1, s2, language, opts)
 
 -- Patch/diffstring
-bufnr = delta.patch_diff(diffstring, is_git_diff, language, opts)
+bufnr = Delta.patch_diff(diffstring, is_git_diff, language, opts)
 ```
 
 ### Highlighting

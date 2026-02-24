@@ -245,8 +245,7 @@ M.create_formatted_buffer = function(diff_data_set)
     local current_line_num = 0
     local separator_width = utils.get_window_width(0) - 8
 
-    -- Line number mapping for statuscolumn. 1-indexed
-    --- @type table<number, {old: number|nil, new: number|nil, type: "added"|"removed"|"context"|nil}>
+    --- @type StatusColumnLineMap
     local line_map = {}
 
     local bar = '─'
@@ -331,8 +330,11 @@ M.create_formatted_buffer = function(diff_data_set)
     vim.api.nvim_set_option_value('modifiable', false, { buf = diff_bufnr })
 
     -- delta_line_map is for status column
+    --- @type StatusColumnLineMap
     vim.b[diff_bufnr].delta_line_map = line_map
+    --- @type DiffData[]
     vim.b[diff_bufnr].delta_diff_data_set = diff_data_set
+    --- @type DeltaArtifact[]
     vim.b[diff_bufnr].delta_artifacts = delta_artifacts
 
     return diff_bufnr
@@ -565,3 +567,6 @@ return M
 --- @field row_number number (0-indexed)
 --- @field content string
 --- @field type "title"|"fence"|
+
+--- Line number mapping for statuscolumn. 1-indexed
+--- @alias StatusColumnLineMap table<number, {old: number|nil, new: number|nil, type: "added"|"removed"|"context"|nil}>
