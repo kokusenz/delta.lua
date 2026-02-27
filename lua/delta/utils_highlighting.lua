@@ -340,7 +340,8 @@ M.get_two_tier_highlights = function(str1, str2, language)
         return nil
     end
 
-    local diff = vim.text.diff(
+    local diff_fn = (vim.text and vim.text.diff) or vim.diff
+    local diff = diff_fn(
         formatted_str1,
         formatted_str2,
         { result_type = 'indices', algorithm = 'myers', ctxlen = 0 })

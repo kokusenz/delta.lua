@@ -44,7 +44,10 @@ end
 M.text_diff = function(s1, s2, language, opts)
     local effective = vim.tbl_deep_extend('force', config.options, opts or {})
 
-    local diffstring = vim.text.diff(s1, s2, { result_type = 'unified', ctxlen = effective.context, algorithm = 'myers' })
+    local diff_fn = (vim.text and vim.text.diff) or vim.diff
+    local s1_stripped = s1:gsub('\n+$', '')
+    local s2_stripped = s2:gsub('\n+$', '')
+    local diffstring = diff_fn(s1_stripped, s2_stripped, { result_type = 'unified', ctxlen = effective.context, algorithm = 'myers' })
     --- @cast diffstring string
     local file_data = M.get_diff_data(diffstring, language)
 
@@ -276,7 +279,7 @@ M.create_formatted_buffer = function(diff_data_set)
             current_line_num = current_line_num + 1
         end
 
-        for _, hunk in ipairs(file_data.hunks) do
+        for idx, hunk in ipairs(file_data.hunks) do
             if #file_data.hunks > 1 then
                 -- show hunk header if there is more than one hunk
                 local context = hunk.context and string.format("%s ", hunk.context)
@@ -319,9 +322,11 @@ M.create_formatted_buffer = function(diff_data_set)
                 current_line_num = current_line_num + 1
             end
 
-            table.insert(output_lines, "")
-            line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
-            current_line_num = current_line_num + 1
+            if idx ~= #file_data.hunks then
+                table.insert(output_lines, "")
+                line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
+                current_line_num = current_line_num + 1
+            end
         end
     end
 

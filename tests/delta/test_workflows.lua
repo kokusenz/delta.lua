@@ -99,12 +99,46 @@ T['text_diff()']['buffer is not modifiable'] = function()
     eq(modifiable, false)
 end
 
+T['text_diff()']['falls back to vim.diff when vim.text is unavailable'] = function()
+    local used_vim_diff = child.lua_get([[(function()
+        local called = false
+        vim.text = nil
+        vim.diff = function(s1, s2, opts)
+            called = true
+            return '@@ -1,2 +1,2 @@\n local x = 1\n-local y = 2\n+local y = 10\n'
+        end
+        M.text_diff('local x = 1\nlocal y = 2', 'local x = 1\nlocal y = 10', 'lua', {})
+        return called
+    end)()]])
+    eq(used_vim_diff, true)
+end
+
 T['text_diff()']['delta_diff_data_set contains a hunk for the changed line'] = function()
     local hunk_count = child.lua_get([[(function()
         local bufnr = M.text_diff('local x = 1\nlocal y = 2', 'local x = 1\nlocal y = 10', 'lua', {})
         return #vim.b[bufnr].delta_diff_data_set[1].hunks
     end)()]])
     eq(hunk_count, 1)
+end
+
+T['text_diff()']['trailing newline difference does not produce an added hunk line for the last line'] = function()
+    local has_spurious_added = child.lua_get([[(function()
+        local s1 = 'local x = 1\nlocal y = 2\n'
+        local s2 = 'local x = 1\nlocal y = 2'
+        local bufnr = M.text_diff(s1, s2, 'lua', {})
+        local data_set = vim.b[bufnr].delta_diff_data_set
+        for _, file_data in ipairs(data_set) do
+            for _, hunk in ipairs(file_data.hunks) do
+                for _, line in ipairs(hunk.lines) do
+                    if line.line_type == 'added' and line.new_line_num == 2 then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end)()]])
+    eq(has_spurious_added, false)
 end
 
 -- ─── patch_diff() ────────────────────────────────────────────────────────────
@@ -153,3 +187,4 @@ T['patch_diff()']['git diff format: delta_diff_data_set has correct file path'] 
 end
 
 return T
+

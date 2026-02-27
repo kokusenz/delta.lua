@@ -528,4 +528,26 @@ T['create_formatted_buffer()']['title artifact present when diff has file paths'
     eq(has_title, true)
 end
 
+T['create_formatted_buffer()']['last line of buffer is not empty for a single-hunk diff'] = function()
+    child.lua([[_G.diff = ...]], { single_hunk_diff })
+    local last_line = child.lua_get([[(function()
+        local data = M.get_diff_data(_G.diff, 'lua')
+        local bufnr = M.create_formatted_buffer({ data })
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        return lines[#lines]
+    end)()]])
+    eq(last_line ~= '', true)
+end
+
+T['create_formatted_buffer()']['last line of buffer is not empty for a multi-hunk diff'] = function()
+    child.lua([[_G.diff = ...]], { multi_hunk_diff })
+    local last_line = child.lua_get([[(function()
+        local data = M.get_diff_data(_G.diff, 'lua')
+        local bufnr = M.create_formatted_buffer({ data })
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        return lines[#lines]
+    end)()]])
+    eq(last_line ~= '', true)
+end
+
 return T
