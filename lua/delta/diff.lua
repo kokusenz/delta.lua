@@ -99,8 +99,6 @@ M.get_diff_data = function(diff, language)
     local diff_line_num = 0 -- Track line number in diff output
 
     for _, line in ipairs(lines) do
-        diff_line_num = diff_line_num + 1
-
         if line:match('^@@') then
             -- hunk header: @@ -old_start,old_count +new_start,new_count @@ [context]
             local old_info, new_info, context = line:match('^@@[%s]+%-([^%s]+)[%s]+%+([^%s]+)[%s]+@@(.*)$')
@@ -179,6 +177,7 @@ M.get_diff_data = function(diff, language)
             old_line_num = old_line_num + 1
             new_line_num = new_line_num + 1
         end
+        diff_line_num = diff_line_num + 1
     end
 
     return file_data
@@ -545,8 +544,8 @@ return M
 --- @field content string The line content
 --- @field old_line_num number|nil Line number in old file (nil if added)
 --- @field new_line_num number|nil Line number in new file (nil if removed)
---- @field diff_line_num number Line number in the diff output
---- @field formatted_diff_line_num number Line number in the diff output; if formatting is applied to the buffer, this field is updated, while diff_line_num remains the same
+--- @field diff_line_num number 0-indexed Line number in the diff output
+--- @field formatted_diff_line_num number 0-indexed Line number in the diff output; if formatting is applied to the buffer, this field is updated, while diff_line_num remains the same.
 --- @field line_type "added"|"removed"|"context" Type of change
 
 --- @class Hunk
