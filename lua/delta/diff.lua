@@ -45,9 +45,7 @@ M.text_diff = function(s1, s2, language, opts)
     local effective = vim.tbl_deep_extend('force', config.options, opts or {})
 
     local diff_fn = (vim.text and vim.text.diff) or vim.diff
-    local s1_stripped = s1:gsub('\n+$', '')
-    local s2_stripped = s2:gsub('\n+$', '')
-    local diffstring = diff_fn(s1_stripped, s2_stripped, { result_type = 'unified', ctxlen = effective.context, algorithm = 'myers' })
+    local diffstring = diff_fn(s1, s2, { result_type = 'unified', ctxlen = effective.context, algorithm = 'myers' })
     --- @cast diffstring string
     local file_data = M.get_diff_data(diffstring, language)
 
