@@ -6,8 +6,8 @@ local M = {}
 --- @return string The formatted statuscolumn content
 M.render = function(lnum)
     -- vim.v.virtnum is 0 for real lines, >0 for wrapped continuation lines
-    if vim.v.virtnum > 0 then
-        return '' -- Show nothing for wrapped lines
+    if vim.v.virtnum ~= 0 then
+        return '' -- Show nothing for wrapped lines and virtual lines
     end
 
     local bufnr = vim.api.nvim_get_current_buf()

@@ -482,15 +482,11 @@ end
 --- @param winid number | nil defaults to current window
 M.setup_delta_statuscolumn = function(bufnr, winid)
     local win = winid or vim.api.nvim_get_current_win()
-
-
-    if vim.api.nvim_win_get_buf(win) ~= bufnr then
-        error(string.format(
-            "Buffer %d must be displayed in window %d before calling setup_delta_statuscolumn. " ..
-            "Please display the buffer first: vim.api.nvim_win_set_buf(%d, %d)",
-            bufnr, winid, win, bufnr
-        ))
-    end
+    assert(vim.api.nvim_win_get_buf(win) == bufnr, string.format(
+        "Buffer %d must be displayed in window %d before calling setup_delta_statuscolumn. " ..
+        "Please display the buffer first: vim.api.nvim_win_set_buf(%d, %d)",
+        bufnr, win, win, bufnr
+    ))
 
     local current_statuscolumn = vim.api.nvim_get_option_value('statuscolumn', { win = win })
 
@@ -498,8 +494,9 @@ M.setup_delta_statuscolumn = function(bufnr, winid)
         '%{%v:lua.require("delta.statuscolumn").render(v:lnum)%}',
         { win = 0 }
     )
+    vim.cmd('redraw')
 
-    vim.api.nvim_create_autocmd('BufLeave', {
+    vim.api.nvim_create_autocmd('BufUnload', {
         buffer = bufnr,
         once = true,
         callback = function()
