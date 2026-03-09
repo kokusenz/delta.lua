@@ -4,9 +4,6 @@ local utils_treesitter = require('delta.utils_treesitter')
 M.initialize_hl_groups = function()
     M.setup_hl_groups()
 
-    -- TODO when writing unit tests, write a test case for when colorschemes change to assert this behavior
-    -- another example test case is that highlights change to light mode when background changes
-    -- Reinitialize highlight groups when colorscheme changes
     vim.api.nvim_create_autocmd('ColorScheme', {
         group = vim.api.nvim_create_augroup('DeltaHighlights', { clear = true }),
         callback = M.setup_hl_groups,
@@ -17,10 +14,8 @@ end
 M.setup_hl_groups = function()
     local config = require('delta.config')
 
-    -- Detect background (light or dark)
     local bg = vim.o.background or 'dark'
 
-    -- Select appropriate highlight group set
     local hl_groups = config.options.highlight_groups[bg]
 
     if not hl_groups then
@@ -32,7 +27,6 @@ M.setup_hl_groups = function()
     end
     --- @cast hl_groups HighlightGroupSet
 
-    -- Apply custom highlight groups from config
     for hl_group_name, hl_def in pairs(hl_groups) do
         vim.api.nvim_set_hl(0, hl_group_name, hl_def)
     end
