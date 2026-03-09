@@ -142,4 +142,28 @@ M.is_metadata_pattern = function(str)
     return false
 end
 
+--- The non treesitter version of splitting a string into its tokens, using basic lua pattern matching (whitespace as separators)
+--- @param str string
+--- @return string[]
+M.get_lua_pattern_token_strings = function(str)
+    local tokens = {}
+    local i = 1
+    while i <= #str do
+        local ws_start, ws_end = str:find('%s+', i)
+        local tok_start, tok_end = str:find('%S+', i)
+        if tok_start and (not ws_start or tok_start <= ws_start) then
+            table.insert(tokens, str:sub(tok_start, tok_end))
+            i = tok_end + 1
+        elseif ws_start then
+            for j = ws_start, ws_end do
+                table.insert(tokens, str:sub(j, j))
+            end
+            i = ws_end + 1
+        else
+            break
+        end
+    end
+    return tokens
+end
+
 return M

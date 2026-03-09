@@ -30,6 +30,7 @@ M.setup_hl_groups = function()
         )
         hl_groups = config.options.highlight_groups.dark
     end
+    --- @cast hl_groups HighlightGroupSet
 
     -- Apply custom highlight groups from config
     for hl_group_name, hl_def in pairs(hl_groups) do
@@ -55,11 +56,11 @@ end
 --- @param opts DeltaOpts | nil Optional configuration overrides
 --- @return table<number, LineHighlight[]> highlights a list of
 M.get_highlights_file = function(file, opts)
+    assert(file)
     local highlights = {}
-    local highlight_two_tiers = true
+    local highlight_two_tiers_with_treesitter = true
     if file.language == nil then
-        vim.notify('Language not established for: ' .. file.new_path .. '. Two tier highlighting will not be applied.', vim.log.levels.WARN)
-        highlight_two_tiers = false
+        highlight_two_tiers_with_treesitter = false
     end
     for _, hunk in ipairs(file.hunks) do
         -- normal line highlighting
@@ -73,12 +74,9 @@ M.get_highlights_file = function(file, opts)
         end
         -- two tier highlighting
         -- within one hunk, check to see what lines are adjacent to each other that are not context
-        if highlight_two_tiers == false then
-            goto continue
-        end
         local adjacent_lines_sets = M.get_adjacent_line_sets(hunk)
         -- maybe map where key is line nuber, value is diff
-        local word_highlights = M.get_highlights(adjacent_lines_sets, opts, file.language)
+        local word_highlights = M.get_highlights(adjacent_lines_sets, opts, file.language, highlight_two_tiers_with_treesitter)
         for line_number, word_highlight in pairs(word_highlights) do
             local cur_highlights = highlights[line_number] or {}
             for _, highlight in ipairs(word_highlight) do
@@ -86,7 +84,6 @@ M.get_highlights_file = function(file, opts)
             end
             highlights[line_number] = cur_highlights
         end
-        ::continue::
     end
     return highlights
 end
@@ -127,8 +124,9 @@ end
 --- @param adjacent_lines_sets table<number, DiffLine>[]
 --- @param opts DeltaOpts | nil Optional configuration overrides
 --- @param language string | nil
+--- @param use_treesitter boolean | nil
 --- @return table<number, LineHighlight[]> highlights key: 1-indexed line number of the diff
-M.get_highlights = function(adjacent_lines_sets, opts, language)
+M.get_highlights = function(adjacent_lines_sets, opts, language, use_treesitter)
     local highlights = {}
     for _, adjacent_lines in ipairs(adjacent_lines_sets) do
         -- sort keys so we can iterate the adjacents ino rder
@@ -216,7 +214,8 @@ M.get_highlights = function(adjacent_lines_sets, opts, language)
                 local diff_highlights = M.get_two_tier_highlights(
                     adjacent_lines[pair.added_line].content,
                     adjacent_lines[pair.removed_line].content,
-                    language
+                    language,
+                    use_treesitter
                 )
                 if diff_highlights == nil then
                     goto continue
@@ -313,16 +312,21 @@ end
 --- @param str1 string (the added/green line)
 --- @param str2 string (the removed/red line)
 --- @param language string | nil
+--- @param use_treesitter boolean | nil
 --- @return TwoTierHighlights | nil highlights for both strings
-M.get_two_tier_highlights = function(str1, str2, language)
-    -- TODO currently doesn't work on txt files. Honestly, probably should; just parse it exactly like markdown? It might just devolve into the lua pattern matching that markdown kinda devolves into anyways. Note the language validation upstream before the two_tier highlight workflow even begins.
-    if language == nil then
+M.get_two_tier_highlights = function(str1, str2, language, use_treesitter)
+    if use_treesitter and language == nil then
         return
     end
-    local tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)
-    local tokens_str2 = utils_treesitter.get_treesitter_token_strings(str2, language)
-    -- IF A LANGUAGE LIKE MARKDOWN, WHERE TREESITTER TOKENS AREN"T GREAT, consider pattern matching
-    -- OR figure out how to make treesitter work
+    local tokens_str1 = nil
+    local tokens_str2 = nil
+    if use_treesitter and language ~= nil then
+        tokens_str1 = utils_treesitter.get_treesitter_token_strings(str1, language)
+        tokens_str2 = utils_treesitter.get_treesitter_token_strings(str2, language)
+    else
+        tokens_str1 = utils_treesitter.get_lua_pattern_token_strings(str1)
+        tokens_str2 = utils_treesitter.get_lua_pattern_token_strings(str2)
+    end
     local formatted_str1 = table.concat(tokens_str1, "\n")
     local formatted_str2 = table.concat(tokens_str2, "\n")
 
