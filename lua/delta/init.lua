@@ -3,6 +3,7 @@ local M = {}
 local config = require('delta.config')
 local utils_highlighting = require('delta.utils_highlighting')
 local diff = require('delta.diff')
+local utils = require('delta.utils')
 
 ---@param opts DeltaOpts
 M.setup = function(opts)
@@ -53,13 +54,16 @@ M._test_git_diff = function(ref)
 end
 
 --- Test function for text diff workflow. This is a typical sequence.
-M._test_text_diff = function()
+--- @param s1 string
+--- @param s2 string
+--- @param lang lang
+M._test_text_diff = function(s1, s2)
     local original =
     "local x = 1\nlocal y = 2\nlocal z = 3\n-- a comment\n-- a second comment\n-- a third comment\n-- a fourth comment\n-- a fourth comment\n-- a fifth comment\n-- a sixth comment\nlocal l = 'original'"
     local modified =
     "local x = 1\nlocal y = 10\nlocal z = 3\n-- a comment\n-- a second comment\n-- a third comment\n-- a fourth comment\n-- a fourth comment\n-- a fifth comment\n-- a sixth comment\nlocal l = 'new'"
 
-    local bufnr = M.text_diff(original, modified, 'lua', {})
+    local bufnr = M.text_diff(s1 or original, s2 or modified, 'lua', {})
     if bufnr == nil then
         return
     end
@@ -72,7 +76,10 @@ M._test_text_diff = function()
 end
 
 --- Test function for patch_diff workflow. This is a typical sequence.
-M._test_patch_diff = function()
+M._test_patch_diff = function(use_current_file, is_git, language)
+    if use_current_file and not is_git and not language then
+        vim.notify("language is expected when used on a non git patch file", vim.log.levels.WARN)
+    end
     local diffstring = table.concat({
         "@@ -1,4 +1,4 @@",
         " local x = 1",
@@ -81,12 +88,19 @@ M._test_patch_diff = function()
         " local z = 3",
         " local w = 4",
     }, "\n")
+    if use_current_file then
+        local file_lines = utils.read_file_lines(vim.fn.expand('%:p'))
+        if file_lines == nil then
+            return
+        end
+        diffstring = table.concat(file_lines, '\n')
+    end
+    local lang = use_current_file and language
 
-    local bufnr = M.patch_diff(diffstring, false, 'lua', {})
+    local bufnr = M.patch_diff(diffstring, is_git or false, not use_current_file and 'lua' or lang, {})
     if bufnr == nil then
         return
     end
-
     vim.api.nvim_win_set_buf(0, bufnr)
     M.highlight_delta_artifacts(bufnr)
     M.syntax_highlight_diff_set(bufnr)
