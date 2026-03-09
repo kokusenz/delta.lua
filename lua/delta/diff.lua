@@ -283,9 +283,9 @@ M.create_formatted_buffer = function(diff_data_set)
                 local hunk_header = context
                     and string.format("Line %d: %s", hunk.new_start, context)
                     or string.format("Line %d ", hunk.new_start)
-                local formatted_hunk_header = hunk_header .. pipe
-                local formatted_hunk_header_top = bar:rep(#hunk_header) .. top_corner
-                local formatted_hunk_header_bottom = bar:rep(#hunk_header) .. bottom_corner
+                local formatted_hunk_header = hunk_header .. (#hunk_header < separator_width and pipe or '')
+                local formatted_hunk_header_top = bar:rep(math.min(#hunk_header, separator_width)) .. top_corner
+                local formatted_hunk_header_bottom = bar:rep(math.min(#hunk_header, separator_width)) .. bottom_corner
                 table.insert(output_lines, formatted_hunk_header_top)
                 table.insert(delta_artifacts,
                     { row_number = current_line_num, content = formatted_hunk_header_top, type = "fence" })
