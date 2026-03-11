@@ -31,7 +31,7 @@ M.parse = parse
 
 --- Test function for git diff workflow. This is a typical sequence.
 --- @param ref string
-M._test_git_diff = function(ref)
+M.test_git_diff = function(ref)
     ref = ref or 'HEAD'
     local cur_path
     local ok, expanded = pcall(vim.fn.expand, '%:p')
@@ -57,7 +57,7 @@ end
 --- @param s1 string
 --- @param s2 string
 --- @param lang lang
-M._test_text_diff = function(s1, s2)
+M.test_text_diff = function(s1, s2)
     local original =
     "local x = 1\nlocal y = 2\nlocal z = 3\n-- a comment\n-- a second comment\n-- a third comment\n-- a fourth comment\n-- a fourth comment\n-- a fifth comment\n-- a sixth comment\nlocal l = 'original'"
     local modified =
@@ -76,7 +76,7 @@ M._test_text_diff = function(s1, s2)
 end
 
 --- Test function for patch_diff workflow. This is a typical sequence.
-M._test_patch_diff = function(use_current_file, is_git, language)
+M.test_patch_diff = function(use_current_file, is_git, language)
     if use_current_file and not is_git and not language then
         vim.notify("language is expected when used on a non git patch file", vim.log.levels.WARN)
     end
