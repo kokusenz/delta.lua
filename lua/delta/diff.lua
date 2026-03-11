@@ -256,7 +256,7 @@ M.create_formatted_buffer = function(diff_data_set)
     --- @type DeltaArtifact[]
     local delta_artifacts = {}
 
-    for _, file_data in ipairs(diff_data_set) do
+    for file_idx, file_data in ipairs(diff_data_set) do
         if file_data.new_path and file_data.old_path then
             local filename_delta = file_data.old_path .. " ⟶   " .. file_data.new_path
             local path_title = file_data.new_path == file_data.old_path and file_data.new_path or filename_delta
@@ -319,7 +319,7 @@ M.create_formatted_buffer = function(diff_data_set)
                 current_line_num = current_line_num + 1
             end
 
-            if idx ~= #file_data.hunks then
+            if idx ~= #file_data.hunks or file_idx ~= #diff_data_set then
                 table.insert(output_lines, "")
                 line_map[current_line_num + 1] = { old = nil, new = nil } -- +1 for 1-based indexing
                 current_line_num = current_line_num + 1
