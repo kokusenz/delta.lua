@@ -446,10 +446,6 @@ end
 --- @param after_content string the full "after" text the diff originated from
 M.syntax_highlight_diff = function(bufnr, diff_data, after_content)
     if diff_data.language == nil then
-        vim.notify(
-            'Language not established for: ' ..
-            (diff_data.new_path or 'undefined') .. '. Treesitter syntax highlighting will not be applied.',
-            vim.log.levels.WARN)
         return
     end
     local tokens = utils_treesitter.get_treesitter_highlight_captures(after_content, diff_data.language)
