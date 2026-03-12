@@ -43,8 +43,9 @@ T['git_diff()'] = new_set()
 
 T['git_diff()']['returns nil when git produces no output'] = function()
     child.lua([[
-        io.popen = function(cmd)
-            return { read = function() return '' end, close = function() end }
+        vim.system = function(cmd, _opts)
+            local code = 2
+            return { wait = function() return { code = code, stdout = '', stderr = '' } end }
         end
     ]])
     local is_nil = child.lua_get([[M.git_diff('HEAD', nil, {}) == nil]])
@@ -54,8 +55,9 @@ end
 T['git_diff()']['returns valid bufnr when diff has changes'] = function()
     child.lua([[
         _G.fixture = ...
-        io.popen = function(cmd)
-            return { read = function() return _G.fixture end, close = function() end }
+        vim.system = function(cmd, _opts)
+            local code = 2
+            return { wait = function() return { code = code, stdout = _G.fixture, stderr = '' } end }
         end
     ]], { git_diff_fixture })
     local valid = child.lua_get([[(function()
@@ -68,8 +70,9 @@ end
 T['git_diff()']['delta_diff_data_set contains the parsed file path'] = function()
     child.lua([[
         _G.fixture = ...
-        io.popen = function(cmd)
-            return { read = function() return _G.fixture end, close = function() end }
+        vim.system = function(cmd, _opts)
+            local code = 2
+            return { wait = function() return { code = code, stdout = _G.fixture, stderr = '' } end }
         end
     ]], { git_diff_fixture })
     local path = child.lua_get([[(function()

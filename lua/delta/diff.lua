@@ -11,22 +11,16 @@ local config = require('delta.config')
 --- @return number | nil bufnr
 M.git_diff = function(ref, path, opts)
     local effective = vim.tbl_deep_extend('force', config.options, opts or {})
-    local cmd = string.format('git diff %s%s', utils.build_git_diff_flags(effective), vim.fn.shellescape(ref))
-    if path ~= nil then
-        cmd = string.format(cmd .. ' -- %s', vim.fn.shellescape(path))
-    end
-    local handle = io.popen(cmd)
-
-    if not handle then
-        vim.notify("Failed to run git diff", vim.log.levels.ERROR)
+    local diff_cmd = utils.build_git_diff_cmd_with_flags(effective, ref, path)
+    local diff_result = vim.system(diff_cmd):wait()
+    if diff_result.code ~= 0 and diff_result.code ~= 1 then
+        vim.notify('An error occured while running git diff - ' .. tostring(diff_result.stderr), vim.log.levels.ERROR)
         return
     end
+    local diffstring = vim.trim(diff_result.stdout)
 
-    local diffstring = handle:read("*a")
-    handle:close()
-
-    if diffstring == "" then
-        vim.notify("No changes detected in current file", vim.log.levels.WARN)
+    if diffstring == '' then
+        vim.notify('No changes detected in current file', vim.log.levels.WARN)
         return
     end
 

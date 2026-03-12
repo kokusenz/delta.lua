@@ -6,6 +6,7 @@ M.defaults = {
     highlighting = {
         max_similarity_threshold = 0.6  -- delta's default threshold for word-level highlighting
     },
+    new_file = false,
     highlight_groups = {
         dark = {
             DeltaDiffAddedLine = {
@@ -114,4 +115,5 @@ return M
 --- @class DeltaOpts
 --- @field context number | nil  Lines of context around each hunk. Default 3. git_diff: -U<n>; text_diff: ctxlen.
 --- @field highlighting HighlightingOpts | nil
+--- @field new_file boolean | nil used as one time flag to diff new files. Recommend that this is not set in config
 --- @field highlight_groups HighlightGroupsOpts | nil

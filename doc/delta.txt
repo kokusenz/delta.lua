@@ -85,6 +85,7 @@ delta.git_diff({ref}, {path}, {opts})                         *delta.git_diff*
         local bufnr = require('delta').git_diff('HEAD')
         local bufnr = require('delta').git_diff('HEAD~1', 'lua/init.lua')
         local bufnr = require('delta').git_diff('HEAD', nil, { context = 10 })
+        local bufnr = require('delta').git_diff('HEAD', nil, { new_file = true })
 <
 
 delta.text_diff({s1}, {s2}, {language}, {opts})              *delta.text_diff*
