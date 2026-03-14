@@ -25,6 +25,7 @@ M.setup_delta_statuscolumn = diff.setup_delta_statuscolumn
 local parse = {}
 parse.get_diff_data_git = diff.get_diff_data_git
 parse.get_diff_data = diff.get_diff_data
+parse.get_language_from_filename = utils.get_language_from_filename
 M.parse = parse
 
 -- Example Usages of Api
