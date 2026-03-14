@@ -3,9 +3,10 @@ local eq = MiniTest.expect.equality
 
 local child = MiniTest.new_child_neovim()
 
--- ─── Utility ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- utility
 
--- usage: add the following to a pre case
+-- usage: add the following to a pre_case hook
 -- child.lua(test_logging)
 local test_logging = [[
     _G.test_logs = {}
@@ -23,7 +24,8 @@ local test_logging = [[
 -- post_case = print_test_logging
 local print_test_logging = function()
     local captured_prints = child.lua_get('_G.captured_prints')
-    if captured_prints and #captured_prints > 0 then
+    if captured_prints == vim.NIL or captured_prints == nil then return end
+    if #captured_prints > 0 then
         print('\n=== Child Neovim Print Statements ===')
         for i, msg in ipairs(captured_prints) do
             print(string.format('[%d] %s', i, msg))
@@ -32,7 +34,8 @@ local print_test_logging = function()
     end
 end
 
--- ─── Fixtures ────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- fixtures
 
 local git_diff_fixture = table.concat({
     "diff --git a/foo.lua b/foo.lua",
@@ -54,13 +57,49 @@ local patch_fixture = table.concat({
     " local z = 3",
 }, "\n")
 
--- ─── Test suite ──────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- setup
 
 local T = new_set({
     hooks = {
         pre_case = function()
             child.restart({ '-u', 'scripts/minimal_init.lua' })
+            child.lua([[
+                -- Stub module-level dependencies before require so M sees the stubs
+                package.loaded['delta.config'] = {
+                    options = {
+                        context = 3,
+                        highlighting = { max_similarity_threshold = 0.6 },
+                        new_file = false,
+                    },
+                }
+                package.loaded['delta.utils'] = {
+                    build_git_diff_cmd_with_flags = function(_effective, _ref, _path)
+                        return { 'git', 'diff', 'HEAD' }
+                    end,
+                    get_window_width = function(_winid) return 80 end,
+                    apply_highlights  = function(_bufnr, _highlights) end,
+                    get_language_from_filename = function(filename)
+                        local ext = filename:match('%.([^%.]+)$')
+                        local map = { lua = 'lua', py = 'python' }
+                        return map[ext]
+                    end,
+                }
+                package.loaded['delta.utils_treesitter'] = {
+                    get_treesitter_highlight_captures = function(_content, _lang) return {} end,
+                    get_treesitter_token_strings      = function(_str, _lang) return {} end,
+                    get_lua_pattern_token_strings     = function(_str) return {} end,
+                }
+                package.loaded['delta.utils_highlighting'] = {
+                    get_highlights_multiple_files = function(_files, _opts) return {} end,
+                }
+
+                vim.fn.systemlist = function(_cmd) return {} end
+                -- Note: vim.v.shell_error is read-only; stubbing systemlist above
+                -- prevents the real shell command from running, keeping shell_error = 0
+            ]])
             child.lua([[M = require('delta.diff')]])
+            child.lua([[_G.fixture = {}]])
             child.lua(test_logging)
         end,
         post_case = print_test_logging,
@@ -68,27 +107,34 @@ local T = new_set({
     },
 })
 
--- ─── git_diff() ──────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- git_diff() - example based tests
 
-T['git_diff()'] = new_set()
+T['git_diff()'] = new_set({
+    hooks = {
+        pre_case = function()
+            child.lua([[
+                vim.system = function(_cmd, _opts)
+                    return { wait = function() return { code = 0, stdout = '', stderr = '' } end }
+                end
+                -- Stub systemlist to return a fake git root; this also prevents the real
+                -- shell command from running, keeping vim.v.shell_error at 0 (its default)
+                vim.fn.systemlist = function(_cmd) return { '/fake/git/root' } end
+            ]])
+        end,
+    },
+})
 
 T['git_diff()']['returns nil when git produces no output'] = function()
-    child.lua([[
-        vim.system = function(cmd, _opts)
-            local code = 0
-            return { wait = function() return { code = code, stdout = '', stderr = '' } end }
-        end
-    ]])
     local is_nil = child.lua_get([[M.git_diff('HEAD', nil, {}) == nil]])
     eq(is_nil, true)
 end
 
 T['git_diff()']['returns valid bufnr when diff has changes'] = function()
     child.lua([[
-        _G.fixture = ...
-        vim.system = function(cmd, _opts)
-            local code = 0
-            return { wait = function() return { code = code, stdout = _G.fixture, stderr = '' } end }
+        _G.fixture.diff_output = ...
+        vim.system = function(_cmd, _opts)
+            return { wait = function() return { code = 0, stdout = _G.fixture.diff_output, stderr = '' } end }
         end
     ]], { git_diff_fixture })
     local valid = child.lua_get([[(function()
@@ -100,10 +146,9 @@ end
 
 T['git_diff()']['delta_diff_data_set contains the parsed file path'] = function()
     child.lua([[
-        _G.fixture = ...
-        vim.system = function(cmd, _opts)
-            local code = 0
-            return { wait = function() return { code = code, stdout = _G.fixture, stderr = '' } end }
+        _G.fixture.diff_output = ...
+        vim.system = function(_cmd, _opts)
+            return { wait = function() return { code = 0, stdout = _G.fixture.diff_output, stderr = '' } end }
         end
     ]], { git_diff_fixture })
     local path = child.lua_get([[(function()
@@ -113,7 +158,8 @@ T['git_diff()']['delta_diff_data_set contains the parsed file path'] = function(
     eq(path, 'foo.lua')
 end
 
--- ─── text_diff() ─────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- text_diff() - example based tests
 
 T['text_diff()'] = new_set()
 
@@ -155,7 +201,8 @@ T['text_diff()']['delta_diff_data_set contains a hunk for the changed line'] = f
     eq(hunk_count, 1)
 end
 
--- ─── patch_diff() ────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- patch_diff() - example based tests
 
 T['patch_diff()'] = new_set()
 
@@ -165,36 +212,36 @@ T['patch_diff()']['returns nil when diffstring is empty'] = function()
 end
 
 T['patch_diff()']['plain unified diff: returns valid bufnr'] = function()
-    child.lua([[_G.fixture = ...]], { patch_fixture })
+    child.lua([[_G.fixture.diff_input = ...]], { patch_fixture })
     local valid = child.lua_get([[(function()
-        local bufnr = M.patch_diff(_G.fixture, false, 'lua', {})
+        local bufnr = M.patch_diff(_G.fixture.diff_input, false, 'lua', {})
         return bufnr ~= nil and vim.api.nvim_buf_is_valid(bufnr)
     end)()]])
     eq(valid, true)
 end
 
 T['patch_diff()']['plain unified diff: buffer has delta_diff_data_set'] = function()
-    child.lua([[_G.fixture = ...]], { patch_fixture })
+    child.lua([[_G.fixture.diff_input = ...]], { patch_fixture })
     local has_data = child.lua_get([[(function()
-        local bufnr = M.patch_diff(_G.fixture, false, 'lua', {})
+        local bufnr = M.patch_diff(_G.fixture.diff_input, false, 'lua', {})
         return vim.b[bufnr].delta_diff_data_set ~= nil
     end)()]])
     eq(has_data, true)
 end
 
 T['patch_diff()']['git diff format: returns valid bufnr'] = function()
-    child.lua([[_G.fixture = ...]], { git_diff_fixture })
+    child.lua([[_G.fixture.diff_input = ...]], { git_diff_fixture })
     local valid = child.lua_get([[(function()
-        local bufnr = M.patch_diff(_G.fixture, true, nil, {})
+        local bufnr = M.patch_diff(_G.fixture.diff_input, true, nil, {})
         return bufnr ~= nil and vim.api.nvim_buf_is_valid(bufnr)
     end)()]])
     eq(valid, true)
 end
 
 T['patch_diff()']['git diff format: delta_diff_data_set has correct file path'] = function()
-    child.lua([[_G.fixture = ...]], { git_diff_fixture })
+    child.lua([[_G.fixture.diff_input = ...]], { git_diff_fixture })
     local path = child.lua_get([[(function()
-        local bufnr = M.patch_diff(_G.fixture, true, nil, {})
+        local bufnr = M.patch_diff(_G.fixture.diff_input, true, nil, {})
         return vim.b[bufnr].delta_diff_data_set[1].new_path
     end)()]])
     eq(path, 'foo.lua')

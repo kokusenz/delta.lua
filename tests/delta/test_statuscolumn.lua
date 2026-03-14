@@ -3,9 +3,10 @@ local eq = MiniTest.expect.equality
 
 local child = MiniTest.new_child_neovim()
 
--- ─── Utility ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- utility
 
--- usage: add the following to a pre case
+-- usage: add the following to a pre_case hook
 -- child.lua(test_logging)
 local test_logging = [[
     _G.test_logs = {}
@@ -32,26 +33,60 @@ local print_test_logging = function()
     end
 end
 
--- ─── Test suite ──────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- setup
 
 local T = new_set({
     hooks = {
         pre_case = function()
             child.restart({ '-u', 'scripts/minimal_init.lua' })
+            child.lua([[
+                -- Stub module-level dependencies before require so M sees the stubs
+                package.loaded['delta.config'] = {
+                    options = {
+                        context = 3,
+                        highlighting = { max_similarity_threshold = 0.6 },
+                        new_file = false,
+                    },
+                }
+                package.loaded['delta.utils'] = {
+                    build_git_diff_cmd_with_flags = function(_effective, _ref, _path)
+                        return { 'git', 'diff', 'HEAD' }
+                    end,
+                    get_window_width = function(_winid) return 80 end,
+                    apply_highlights  = function(_bufnr, _highlights) end,
+                    get_language_from_filename = function(filename)
+                        local ext = filename:match('%.([^%.]+)$')
+                        local map = { lua = 'lua', py = 'python' }
+                        return map[ext]
+                    end,
+                }
+                package.loaded['delta.utils_treesitter'] = {
+                    get_treesitter_highlight_captures = function(_content, _lang) return {} end,
+                    get_treesitter_token_strings      = function(_str, _lang) return {} end,
+                    get_lua_pattern_token_strings     = function(_str) return {} end,
+                }
+                package.loaded['delta.utils_highlighting'] = {
+                    get_highlights_multiple_files = function(_files, _opts) return {} end,
+                }
+            ]])
             child.lua([[M = require('delta.diff')]])
             child.lua([[R = require('delta.statuscolumn')]])
+            child.lua([[_G.fixture = {}]])
+            child.lua(test_logging)
         end,
+        post_case = print_test_logging,
         post_once = child.stop,
     },
 })
 
--- ─── setup_delta_statuscolumn() ──────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- setup_delta_statuscolumn() - example based tests
 
 T['setup_delta_statuscolumn()'] = new_set({
     hooks = {
         pre_case = function()
             child.lua([[
-                _G.fixture = {}
                 local bufnr = vim.api.nvim_create_buf(false, true)
                 vim.api.nvim_win_get_buf = function() return bufnr end
                 _G.fixture.bufnr = bufnr
@@ -82,7 +117,7 @@ T['setup_delta_statuscolumn()']['sets statuscolumn option value'] = function()
     eq(valid, true)
 end
 
-T['setup_delta_statuscolumn()']['should call vim.cmd(\'redraw\')'] = function()
+T['setup_delta_statuscolumn()']['calls vim.cmd(\'redraw\')'] = function()
     local valid = child.lua_get([[(function()
         local redraw_called = false
         vim.cmd = function(cmd)
@@ -95,7 +130,7 @@ T['setup_delta_statuscolumn()']['should call vim.cmd(\'redraw\')'] = function()
     eq(valid, true)
 end
 
-T['setup_delta_statuscolumn()']['should restore statuscolumn on BufUnload'] = function()
+T['setup_delta_statuscolumn()']['restores statuscolumn on BufUnload'] = function()
     local valid = child.lua_get([[(function()
         local autocmd_callback = nil
         vim.api.nvim_create_autocmd = function(event, opts)
@@ -125,14 +160,13 @@ T['setup_delta_statuscolumn()']['should restore statuscolumn on BufUnload'] = fu
     eq(valid, true)
 end
 
-
--- ─── render() ───────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- render() - example based tests
 
 T['render()'] = new_set({
     hooks = {
         pre_case = function()
             child.lua([[
-                _G.fixture = {}
                 local bufnr = vim.api.nvim_create_buf(false, true)
                 _G.fixture.bufnr = bufnr
                 vim.api.nvim_get_current_buf = function() return bufnr end
@@ -173,7 +207,7 @@ T['render()']['renders added line with highlight'] = function()
 end
 
 T['render()']['renders removed line with highlight'] = function()
-    local output =child.lua_get([[(
+    local output = child.lua_get([[(
         function()
             vim.b[_G.fixture.bufnr].delta_line_map = {
                 [1] = { type = 'removed', old = 3, new = nil }

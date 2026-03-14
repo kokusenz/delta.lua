@@ -40,6 +40,14 @@ local T = new_set({
     hooks = {
         pre_case = function()
             child.restart({ '-u', 'scripts/minimal_init.lua' })
+            child.lua([[
+                -- Stub delta.utils_treesitter before require so M sees the stub
+                package.loaded['delta.utils_treesitter'] = {
+                    get_treesitter_highlight_captures = function(_content, _lang) return {} end,
+                    get_treesitter_token_strings      = function(_str, _lang) return {} end,
+                    get_lua_pattern_token_strings     = function(_str) return {} end,
+                }
+            ]])
             child.lua([[M = require('delta.utils_highlighting')]])
             child.lua([[_G.fixture = {}]])
             child.lua(test_logging)
@@ -49,7 +57,7 @@ local T = new_set({
     },
 })
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- initialize_hl_groups() - property based tests
 
 local InitializeHlGroups = {}
@@ -92,7 +100,7 @@ for prop_name, prop in pairs(InitializeHlGroups.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- setup_hl_groups() - property based tests
 
 local SetupHlGroups = {}
@@ -139,7 +147,7 @@ for prop_name, prop in pairs(SetupHlGroups.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_highlights_multiple_files() - property based tests
 
 local GetHighlightsMultipleFiles = {}
@@ -178,7 +186,7 @@ for prop_name, prop in pairs(GetHighlightsMultipleFiles.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_highlights_file() - property based tests
 
 local GetHighlightsFile = {}
@@ -237,7 +245,7 @@ for prop_name, prop in pairs(GetHighlightsFile.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_line_highlights() - property based tests
 
 local GetLineHighlights = {}
@@ -284,7 +292,7 @@ for prop_name, prop in pairs(GetLineHighlights.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_adjacent_line_sets() - property based tests
 
 local GetAdjacentLineSets = {}
@@ -446,7 +454,7 @@ for prop_name, prop in pairs(GetAdjacentLineSets.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_highlights() - property based tests
 
 local GetHighlights = {}
@@ -607,7 +615,7 @@ for prop_name, prop in pairs(GetHighlights.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- get_two_tier_highlights() - property based tests
 
 local GetTwoTierHighlights = {}
@@ -773,7 +781,7 @@ for prop_name, prop in pairs(GetTwoTierHighlights.properties) do
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
 -- calculate_similarity() - property based tests
 
 local CalculateSimilarity = {}
