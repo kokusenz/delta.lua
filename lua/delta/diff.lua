@@ -11,8 +11,16 @@ local config = require('delta.config')
 --- @return number | nil bufnr
 M.git_diff = function(ref, path, opts)
     local effective = vim.tbl_deep_extend('force', config.options, opts or {})
+    local git_root = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
+    if vim.v.shell_error ~= 0 then
+        vim.notify('Not in a git repository', vim.log.levels.ERROR)
+        return
+    end
+    if effective.new_file and path and path:sub(1, 1) == '/' then
+        path = path:sub(#git_root + 2)
+    end
     local diff_cmd = utils.build_git_diff_cmd_with_flags(effective, ref, path)
-    local diff_result = vim.system(diff_cmd):wait()
+    local diff_result = vim.system(diff_cmd, { cwd = git_root }):wait()
     if diff_result.code ~= 0 and diff_result.code ~= 1 then
         vim.notify('An error occured while running git diff - ' .. tostring(diff_result.stderr), vim.log.levels.ERROR)
         return
