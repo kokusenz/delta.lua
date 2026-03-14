@@ -211,9 +211,9 @@ M.get_diff_data_git = function(diff)
                 j = j + 1
             end
             current_old_path = lines[j]:match('^%-%-%-[%s]+[ab]/(.+)$') or lines[j]:match(
-                '^%-%-%-[%s]+/dev/null$')
+                '^%-%-%-([%s])+/dev/null$')
             current_new_path = lines[j + 1]:match('^%+%+%+[%s]+[ab]/(.+)$') or lines[j + 1]:match(
-                '^%+%+%+[%s]+/dev/null$')
+                '^%+%+%+([%s])+/dev/null$')
             i = j + 2
         else
             -- normal lines of code
@@ -251,9 +251,11 @@ M.create_formatted_buffer = function(diff_data_set)
     local delta_artifacts = {}
 
     for file_idx, file_data in ipairs(diff_data_set) do
-        if file_data.new_path and file_data.old_path then
-            local filename_delta = file_data.old_path .. " ⟶   " .. file_data.new_path
-            local path_title = file_data.new_path == file_data.old_path and file_data.new_path or filename_delta
+        if file_data.new_path or file_data.old_path then
+            local path_title = file_data.new_path
+            if file_data.new_path and file_data.old_path and file_data.new_path ~= file_data.old_path then
+                path_title = file_data.old_path .. " ⟶   " .. file_data.new_path
+            end
             table.insert(output_lines, path_title)
             table.insert(delta_artifacts, { row_number = current_line_num, content = path_title, type = "title" })
             line_map[current_line_num + 1] = { old = nil, new = nil }
