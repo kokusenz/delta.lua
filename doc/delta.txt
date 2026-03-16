@@ -7,11 +7,13 @@ License: MIT
 CONTENTS                                                      *delta-contents*
 
     1. Introduction ........................ |delta-introduction|
-    2. Setup ............................... |delta-setup|
-    3. Functions ........................... |delta-functions|
-        3.1 Buffer Creation ................ |delta-buffer-creation|
-        3.2 Highlighting ................... |delta-highlighting|
-        3.3 Window Setup ................... |delta-window-setup|
+    2. Requirements ........................ |delta-requirements|
+    3. Setup ............................... |delta-setup|
+    4. Functions ........................... |delta-functions|
+        4.1 Buffer Creation ................ |delta-buffer-creation|
+        4.2 Highlighting ................... |delta-highlighting|
+        4.3 Window Setup ................... |delta-window-setup|
+    5. Troubleshooting ..................... |delta-troubleshooting|
 
 ==============================================================================
 INTRODUCTION                                              *delta-introduction*
@@ -31,11 +33,26 @@ This makes it suitable for integration into plugins like deltaview.nvim,
 codecompanion.nvim, or custom diff workflows.
 
 Features:
-- Git diffs, text diffs, and patch file support
-- Treesitter syntax highlighting
-- Two-tier diff highlighting (line + word level)
-- Dual line numbers in statuscolumn (old/new)
-- Buffer-local data storage for querying
+- Three diff input modes: git diff, text diff, and patch/diffstring
+- Two-tier diff highlighting (line-level background + word-level token highlights)
+- Treesitter syntax highlighting on diff content
+- Treesitter two-tier diffing: treesitter tokens used as unit of comparison for
+  word-level diffs, with Lua-pattern splitting as fallback
+- Similarity-based line pairing via Levenshtein distance before word highlighting
+- Light and dark theme support with automatic reapplication on colorscheme change
+- Customisable highlight groups per background type
+- Delta-style statuscolumn with old/new line numbers, coloured by line type
+- Granular composable API: each step is a separate function
+- Parsed diff data stored as buffer variables for downstream consumers
+
+==============================================================================
+REQUIREMENTS                                              *delta-requirements*
+
+- Neovim >= 0.10
+- Treesitter (built into Neovim; required for syntax and word-level highlighting)
+- Git (optional, but recommended; only required for |delta.git_diff|)
+
+Run |:checkhealth| delta to verify your environment.
 
 ==============================================================================
 SETUP/CONFIGURATION                                *delta-setup* *delta-config*
@@ -48,16 +65,50 @@ Minimal setup (uses defaults):
 With configuration:
 >lua
     require('delta').setup({
+        -- Lines of context around each hunk.
+        -- Passed as -U<n> to git diff, or as ctxlen to vim.text.diff.
+        -- Default: 3
+        context = 3,
+
         highlighting = {
-            max_similarity_threshold = 0.6  -- Threshold for word-level diffs
+            -- Minimum Levenshtein similarity (0.0-1.0) for two lines to be
+            -- paired for word-level highlighting. Lines below this threshold
+            -- get only line-level highlighting.
+            -- Matches delta's --max-line-distance option.
+            -- Default: 0.6
+            max_similarity_threshold = 0.6,
         },
+
+        -- One-time flag to diff new (untracked) files against /dev/null.
+        -- Not recommended to set in your permanent config.
+        -- Default: false
+        new_file = false,
+
+        -- Highlight group definitions, separated by background type.
+        -- Each group accepts `fg`, `bg`, and `default` (boolean).
+        -- When `default = true` the group will not override user-defined colors.
         highlight_groups = {
             dark = {
-                DeltaDiffAddedLine = { bg = '#002800', default = true },
-                DeltaDiffRemovedLine = { bg = '#3f0001', default = true },
-                -- ... see lua/delta/config.lua for full options
-            }
-        }
+                DeltaDiffAddedLine   = { bg = '#002800' },
+                DeltaDiffRemovedLine = { bg = '#3f0001' },
+                DeltaDiffAddedWord   = { bg = '#006000' },
+                DeltaDiffRemovedWord = { bg = '#901011' },
+                DeltaTitle           = { fg = '#24acd4' },
+                DeltaLineNrAdded     = { fg = '#008400' },
+                DeltaLineNrRemoved   = { fg = '#800202' },
+                DeltaLineNrContext   = { fg = '#444444' },
+            },
+            light = {
+                DeltaDiffAddedLine   = { bg = '#cfffd0' },
+                DeltaDiffRemovedLine = { bg = '#ffdee2' },
+                DeltaDiffAddedWord   = { bg = '#9df0a2' },
+                DeltaDiffRemovedWord = { bg = '#ffc1bf' },
+                DeltaTitle           = { fg = '#0088aa' },
+                DeltaLineNrAdded     = { fg = '#008400' },
+                DeltaLineNrRemoved   = { fg = '#800202' },
+                DeltaLineNrContext   = { fg = '#444444' },
+            },
+        },
     })
 <
 
@@ -243,4 +294,19 @@ Text diff workflow:
     delta.setup_delta_statuscolumn(bufnr)
 <
 
-vim:tw=78:ts=8:ft=help:norl:
+==============================================================================
+TROUBLESHOOTING                                      *delta-troubleshooting*
+
+Run the built-in health check to diagnose common issues:
+>vim
+    :checkhealth delta
+<
+
+This checks:
+- Neovim version meets the minimum requirement
+- vim.text.diff or vim.diff is available
+- git is on PATH
+- vim.treesitter is available
+- Delta highlight groups are defined
+
+For bugs or questions, open an issue on the repository.
