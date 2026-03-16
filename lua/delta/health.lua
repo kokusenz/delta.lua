@@ -1,6 +1,6 @@
 local M = {}
 
-local NVIM_MIN_VERSION = { major = 0, minor = 9, patch = 0 }
+local NVIM_MIN_VERSION = { major = 0, minor = 10, patch = 0 }
 
 --- Check that Neovim meets the minimum version requirement.
 local function check_neovim_version()
@@ -11,13 +11,13 @@ local function check_neovim_version()
 
     if ok then
         vim.health.ok(string.format(
-            "Neovim >= 0.9 (running %d.%d.%d)",
+            "Neovim >= 0.10 (running %d.%d.%d)",
             v.major, v.minor, v.patch
         ))
     else
         vim.health.error(
-            string.format("Neovim >= 0.9 required (running %d.%d.%d)", v.major, v.minor, v.patch),
-            "Upgrade Neovim to at least version 0.9"
+            string.format("Neovim >= 0.10 required (running %d.%d.%d)", v.major, v.minor, v.patch),
+            "Upgrade Neovim to at least version 0.10"
         )
     end
 end
@@ -44,7 +44,7 @@ local function check_treesitter()
     else
         vim.health.error(
             "vim.treesitter is not available",
-            "Treesitter support is built into Neovim >= 0.9. Ensure you are running a supported version."
+            "Treesitter support is built into Neovim >= 0.10. Ensure you are running a supported version."
         )
     end
 end
@@ -115,3 +115,4 @@ M.check = function()
 end
 
 return M
+
