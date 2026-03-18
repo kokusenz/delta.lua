@@ -218,9 +218,9 @@ M.get_diff_data_git = function(diff)
             while j <= #lines and not lines[j]:match('^%-%-%-') and not lines[j + 1]:match('^%+%+%+') do
                 j = j + 1
             end
-            current_old_path = lines[j]:match('^%-%-%-[%s]+[ab]/(.+)$') or lines[j]:match(
+            current_old_path = lines[j]:match('^%-%-%-[%s]+%w/(.+)$') or lines[j]:match(
                 '^%-%-%-([%s])+/dev/null$')
-            current_new_path = lines[j + 1]:match('^%+%+%+[%s]+[ab]/(.+)$') or lines[j + 1]:match(
+            current_new_path = lines[j + 1]:match('^%+%+%+[%s]+%w/(.+)$') or lines[j + 1]:match(
                 '^%+%+%+([%s])+/dev/null$')
             i = j + 2
         else

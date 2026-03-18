@@ -107,6 +107,39 @@ local new_file_git_diff = table.concat({
     "+local y = 2",
 }, "\n")
 
+-- diff.mnemonicPrefix uses c/ (commit) and w/ (worktree) instead of a/ and b/
+local mnemonic_prefix_single_file_git_diff = table.concat({
+    "diff --git c/foo.lua w/foo.lua",
+    "index abc1234..def5678 100644",
+    "--- c/foo.lua",
+    "+++ w/foo.lua",
+    "@@ -1,3 +1,3 @@",
+    " local x = 1",
+    "-local y = 2",
+    "+local y = 10",
+    " local z = 3",
+}, "\n")
+
+-- diff.mnemonicPrefix with i/ (index) and w/ (worktree) for staged vs worktree
+local mnemonic_prefix_multi_file_git_diff = table.concat({
+    "diff --git c/foo.lua w/foo.lua",
+    "index abc1234..def5678 100644",
+    "--- c/foo.lua",
+    "+++ w/foo.lua",
+    "@@ -1,2 +1,2 @@",
+    "-local x = 1",
+    "+local x = 2",
+    " local y = 3",
+    "diff --git c/bar.py w/bar.py",
+    "index ghi5678..jkl9012 100644",
+    "--- c/bar.py",
+    "+++ w/bar.py",
+    "@@ -5,2 +5,2 @@",
+    "-x = 1",
+    "+x = 2",
+    " y = 3",
+}, "\n")
+
 local git_diff_artifacts_in_content_git_diff_deleted = table.concat({
     "diff --git a/foo.lua b/foo.lua",
     "index abc1234..def5678 100644",
@@ -503,6 +536,27 @@ T['get_diff_data_git()']['triple plus outside of a hunk header will be processed
         end
     end
     eq(found, true)
+end
+
+T['get_diff_data_git()']['parses paths with mnemonic prefix (c/w)'] = function()
+    child.lua([[_G.fixture.diff = ...]], { mnemonic_prefix_single_file_git_diff })
+    local paths = child.lua_get([[(function()
+        local d = M.get_diff_data_git(_G.fixture.diff)[1]
+        return { old_path = d.old_path, new_path = d.new_path }
+    end)()]])
+    eq(paths.old_path, 'foo.lua')
+    eq(paths.new_path, 'foo.lua')
+end
+
+T['get_diff_data_git()']['returns one entry per file with mnemonic prefix'] = function()
+    child.lua([[_G.fixture.diff = ...]], { mnemonic_prefix_multi_file_git_diff })
+    local result = child.lua_get([[(function()
+        local data = M.get_diff_data_git(_G.fixture.diff)
+        return { count = #data, first = data[1].new_path, second = data[2].new_path }
+    end)()]])
+    eq(result.count, 2)
+    eq(result.first, 'foo.lua')
+    eq(result.second, 'bar.py')
 end
 
 -- ──────────────────────────────────────────────────────────────────────────────────────────────
