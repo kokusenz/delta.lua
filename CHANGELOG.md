@@ -32,4 +32,6 @@ commit - 305dd5d5c2d7138f10052ba2cbff8e3bb9b1bc76
 
 #### Fixes
 
+- support for git diff.mnemonicPrefix in path parsing - 99759f8ae4d2304214637de41b331043eb469b91
+
 ## History
