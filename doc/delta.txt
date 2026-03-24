@@ -66,7 +66,6 @@ With configuration:
 >lua
     require('delta').setup({
         -- Lines of context around each hunk.
-        -- Passed as -U<n> to git diff, or as ctxlen to vim.text.diff.
         -- Default: 3
         context = 3,
 
@@ -79,14 +78,13 @@ With configuration:
             max_similarity_threshold = 0.6,
         },
 
-        -- One-time flag to diff new (untracked) files against /dev/null.
-        -- Not recommended to set in your permanent config.
-        -- Default: false
-        new_file = false,
-
         -- Highlight group definitions, separated by background type.
-        -- Each group accepts `fg`, `bg`, and `default` (boolean).
-        -- When `default = true` the group will not override user-defined colors.
+        -- Each group also accepts `default` (boolean). The built-in groups all have
+        -- `default = true`, which means they will not override a group already defined
+        -- by another source (e.g. a colorscheme). If you are using a plugin manager
+        -- with deferred/lazy loading and your custom colors are not taking effect,
+        -- explicitly set `default = false` in each group you override to force the
+        -- value to be applied regardless of load order.
         highlight_groups = {
             dark = {
                 DeltaDiffAddedLine   = { bg = '#002800' },

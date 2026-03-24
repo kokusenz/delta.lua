@@ -137,7 +137,6 @@ require('delta').setup({
 ```lua
 require('delta').setup({
     -- Lines of context around each hunk.
-    -- Passed as -U<n> to git diff, or as ctxlen to vim.text.diff.
     -- Default: 3
     context = 3,
 
@@ -149,34 +148,17 @@ require('delta').setup({
         max_similarity_threshold = 0.6,
     },
 
-    -- One-time flag to diff new (untracked) files against /dev/null.
-    -- Not recommended to set in your permanent config.
-    -- Default: false
-    new_file = false,
-
     -- Highlight group definitions, separated by background type.
     -- Each group accepts `fg`, `bg`, and `default` (boolean).
     -- When `default = true` the group will not override user-defined colors.
+    -- To write a custom color, include default = false
+    -- to view all possible highlight groups to override, check out :h delta
     highlight_groups = {
         dark = {
-            DeltaDiffAddedLine   = { bg = '#002800' },
-            DeltaDiffRemovedLine = { bg = '#3f0001' },
-            DeltaDiffAddedWord   = { bg = '#006000' },
-            DeltaDiffRemovedWord = { bg = '#901011' },
-            DeltaTitle           = { fg = '#24acd4' },
-            DeltaLineNrAdded     = { fg = '#008400' },
-            DeltaLineNrRemoved   = { fg = '#800202' },
-            DeltaLineNrContext   = { fg = '#444444' },
+            DeltaDiffAddedLine   = { bg = '#FFD700', default = false }, -- for example
         },
         light = {
-            DeltaDiffAddedLine   = { bg = '#cfffd0' },
-            DeltaDiffRemovedLine = { bg = '#ffdee2' },
-            DeltaDiffAddedWord   = { bg = '#9df0a2' },
-            DeltaDiffRemovedWord = { bg = '#ffc1bf' },
-            DeltaTitle           = { fg = '#0088aa' },
-            DeltaLineNrAdded     = { fg = '#008400' },
-            DeltaLineNrRemoved   = { fg = '#800202' },
-            DeltaLineNrContext   = { fg = '#444444' },
+            DeltaDiffAddedLine   = { bg = '#FFD700', default = false }, -- for example
         },
     },
 })
