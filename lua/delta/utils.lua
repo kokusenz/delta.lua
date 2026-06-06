@@ -139,21 +139,9 @@ M.get_extension_from_language = function(language)
 end
 
 M.get_window_width = function(winid)
-    local win_width = vim.api.nvim_win_get_width(winid)
-    local numberwidth = vim.api.nvim_get_option_value('numberwidth', { win = winid })
-    local signcolumn = vim.api.nvim_get_option_value('signcolumn', { win = winid })
-    local foldcolumn = vim.api.nvim_get_option_value('foldcolumn', { win = winid })
-
-    local gutter_width = 0
-    if vim.api.nvim_get_option_value('number', { win = winid }) or vim.api.nvim_get_option_value('relativenumber', { win = winid }) then
-        gutter_width = gutter_width + numberwidth
-    end
-    if signcolumn == 'yes' or signcolumn == 'auto' then
-        gutter_width = gutter_width + 2 -- sign column is typically 2 chars wide
-    end
-    gutter_width = gutter_width + tonumber(foldcolumn)
-
-    return win_width - gutter_width
+    local win = (winid == 0) and vim.api.nvim_get_current_win() or winid
+    local info = vim.fn.getwininfo(win)[1]
+    return info.width - info.textoff
 end
 
 --- Builds the git diff cmd with CLI flags string from effective opts

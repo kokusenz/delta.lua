@@ -249,4 +249,113 @@ T['build_git_diff_cmd_with_flags()']['omits -- separator and path when path is n
     end
 end
 
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- get_window_width() - example based tests
+
+T['get_window_width()'] = new_set({
+    hooks = {
+        pre_case = function()
+            child.lua([[
+                local bufnr = vim.api.nvim_create_buf(true, true)
+                vim.api.nvim_set_current_buf(bufnr)
+                _G.fixture.bufnr = bufnr
+                _G.fixture.winnr = vim.api.nvim_get_current_win()
+            ]])
+        end,
+    },
+})
+
+T['get_window_width()']['returns a number when winid is 0'] = function()
+    local result = child.lua_get('M.get_window_width(0)')
+    eq(type(result), 'number')
+end
+
+T['get_window_width()']['winid 0 gives the same result as the explicit current win id'] = function()
+    local result = child.lua_get([[(function()
+        local with_zero = M.get_window_width(0)
+        local with_id   = M.get_window_width(vim.api.nvim_get_current_win())
+        return with_zero == with_id
+    end)()]])
+    eq(result, true)
+end
+
+T['get_window_width()']['result equals getwininfo width minus textoff'] = function()
+    local result = child.lua_get([[(function()
+        local winnr      = vim.api.nvim_get_current_win()
+        local calculated = M.get_window_width(winnr)
+        local info       = vim.fn.getwininfo(winnr)[1]
+        return calculated == (info.width - info.textoff)
+    end)()]])
+    eq(result, true)
+end
+
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- get_window_width() - property based tests
+
+local GetWindowWidth = {}
+
+GetWindowWidth.get_inputs = function(_case)
+    local inputs = {}
+    local foldcolumn_vals     = { '1', 'auto', 'auto:3' }
+    local signcolumn_vals     = { 'no', 'yes', 'auto' }
+    local number_vals         = { false, true }
+    local relativenumber_vals = { false, true }
+
+    for _, fc  in ipairs(foldcolumn_vals) do
+        for _, sc  in ipairs(signcolumn_vals) do
+            for _, nu  in ipairs(number_vals) do
+                for _, rnu in ipairs(relativenumber_vals) do
+                    table.insert(inputs, {
+                        foldcolumn     = fc,
+                        signcolumn     = sc,
+                        number         = nu,
+                        relativenumber = rnu,
+                    })
+                end
+            end
+        end
+    end
+    return inputs
+end
+
+GetWindowWidth.get_window_width__property_cases = {
+    { name = 'all option permutations', buf_contents = {}, get_inputs = GetWindowWidth.get_inputs },
+}
+
+GetWindowWidth.properties = {}
+
+GetWindowWidth.properties.result_equals_width_minus_textoff = [[(function()
+    local inputs = _G.fixture.inputs
+    local winnr  = _G.fixture.winnr
+    for _, input in ipairs(inputs) do
+        vim.api.nvim_set_option_value('foldcolumn',     input.foldcolumn,     { win = winnr })
+        vim.api.nvim_set_option_value('signcolumn',     input.signcolumn,     { win = winnr })
+        vim.api.nvim_set_option_value('number',         input.number,         { win = winnr })
+        vim.api.nvim_set_option_value('relativenumber', input.relativenumber, { win = winnr })
+        local result = M.get_window_width(winnr)
+        local info   = vim.fn.getwininfo(winnr)[1]
+        if result ~= (info.width - info.textoff) then return false end
+    end
+    return true
+end)()]]
+
+T['get_window_width() properties'] = new_set()
+for prop_name, prop in pairs(GetWindowWidth.properties) do
+    for _, case in ipairs(GetWindowWidth.get_window_width__property_cases) do
+        T['get_window_width() properties'][prop_name .. ': ' .. case.name] = function()
+            child.lua([[
+                local buf_contents = ...
+                local bufnr = vim.api.nvim_create_buf(true, true)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, buf_contents)
+                vim.api.nvim_set_current_buf(bufnr)
+                _G.fixture.bufnr = bufnr
+                _G.fixture.winnr = vim.api.nvim_get_current_win()
+            ]], { case.buf_contents })
+            child.lua([[_G.fixture.inputs = ...]], { case.get_inputs(case) })
+            local result = child.lua_get(prop)
+            eq(result, true)
+        end
+    end
+end
+
 return T
