@@ -87,6 +87,7 @@ M.get_language_from_filename = function(filename)
         scala = "scala",
         clj = "clojure",
         dart = "dart",
+        zig = "zig",
     }
 
     return ext_to_lang[extension]
@@ -133,6 +134,7 @@ M.get_extension_from_language = function(language)
         scala = "scala",
         clojure = "clj",
         dart = "dart",
+        zig = "zig",
     }
 
     return lang_to_ext[language]
