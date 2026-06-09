@@ -139,19 +139,17 @@ M.get_extension_from_language = function(language)
 end
 
 M.get_window_width = function(winid)
+    -- vim.fn.getwininfo() doesn't treat 0 as the current window the way the
+    -- nvim_* API does, so resolve it explicitly.
+    if winid == 0 then winid = vim.api.nvim_get_current_win() end
     local win_width = vim.api.nvim_win_get_width(winid)
-    local numberwidth = vim.api.nvim_get_option_value('numberwidth', { win = winid })
-    local signcolumn = vim.api.nvim_get_option_value('signcolumn', { win = winid })
-    local foldcolumn = vim.api.nvim_get_option_value('foldcolumn', { win = winid })
 
-    local gutter_width = 0
-    if vim.api.nvim_get_option_value('number', { win = winid }) or vim.api.nvim_get_option_value('relativenumber', { win = winid }) then
-        gutter_width = gutter_width + numberwidth
-    end
-    if signcolumn == 'yes' or signcolumn == 'auto' then
-        gutter_width = gutter_width + 2 -- sign column is typically 2 chars wide
-    end
-    gutter_width = gutter_width + tonumber(foldcolumn)
+    -- 'textoff' is the count of columns actually occupied by the line-number,
+    -- 'signcolumn' and 'foldcolumn' gutters as currently rendered. Using it
+    -- avoids reinventing that math, and correctly handles the 'auto'/'auto:N'
+    -- forms of 'foldcolumn' (whose width tracks the folds actually present)
+    -- and 'signcolumn', where tonumber()/== 'auto' checks would break or undercount.
+    local gutter_width = vim.fn.getwininfo(winid)[1].textoff
 
     return win_width - gutter_width
 end

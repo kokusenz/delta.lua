@@ -13,6 +13,7 @@ I try to attach a commit to each log, but in the initial pr, I may use the pr in
 
 #### Fixes
 - `--no-ext-diff` is passed as a flag into all git diff invocations, to avoid crashing with diff.external configuration (such as difftastic).
+- `get_window_width` no longer crashes when `'foldcolumn'` is set to the `auto`/`auto:N` form (e.g. `auto:9`). It now derives the gutter width from `getwininfo().textoff`, which reflects the actually-rendered gutter and tracks the fold level. - PR_LINK_PLACEHOLDER
 
 ## History
 

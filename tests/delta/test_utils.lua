@@ -249,4 +249,54 @@ T['build_git_diff_cmd_with_flags()']['omits -- separator and path when path is n
     end
 end
 
+-- ──────────────────────────────────────────────────────────────────────────────────────────────
+-- get_window_width()
+
+T['get_window_width()'] = new_set()
+
+-- regression: 'foldcolumn' accepts the 'auto'/'auto:N' forms, not just a plain
+-- number. tonumber('auto:9') is nil, which previously crashed get_window_width
+-- with "attempt to perform arithmetic on a nil value".
+T['get_window_width()']['does not error with auto:N foldcolumn'] = function()
+    local result = child.lua_get([[(function()
+        vim.o.foldcolumn = 'auto:9'
+        vim.o.number = true
+        vim.o.signcolumn = 'yes'
+        local ok, val = pcall(M.get_window_width, 0)
+        return { ok = ok, val = val }
+    end)()]])
+
+    eq(result.ok, true)
+    eq(type(result.val), 'number')
+end
+
+-- width is the window's full width minus the rendered gutter ('textoff').
+T['get_window_width()']['subtracts the rendered gutter width'] = function()
+    local result = child.lua_get([[(function()
+        vim.o.foldcolumn = 'auto:9'
+        vim.o.number = true
+        vim.o.signcolumn = 'yes'
+        local win = vim.api.nvim_get_current_win()
+        local full = vim.api.nvim_win_get_width(win)
+        local textoff = vim.fn.getwininfo(win)[1].textoff
+        return { expected = full - textoff, actual = M.get_window_width(0) }
+    end)()]])
+
+    eq(result.actual, result.expected)
+end
+
+-- with no gutter, the full window width is returned.
+T['get_window_width()']['returns full width when no gutter is shown'] = function()
+    local result = child.lua_get([[(function()
+        vim.o.foldcolumn = '0'
+        vim.o.number = false
+        vim.o.relativenumber = false
+        vim.o.signcolumn = 'no'
+        local win = vim.api.nvim_get_current_win()
+        return { full = vim.api.nvim_win_get_width(win), actual = M.get_window_width(0) }
+    end)()]])
+
+    eq(result.actual, result.full)
+end
+
 return T
