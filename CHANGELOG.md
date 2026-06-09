@@ -7,12 +7,21 @@ I try to attach a commit to each log, but in the initial pr, I may use the pr in
 
 ## Latest
 
-### [0.1.4] - 2026-06-02 to ongoing
+### [0.1.4] - 2026-06-09 to ongoing
+
+- initial commit - https://github.com/kokusenz/delta.lua/pull/10
+
+#### Fixes
+- `zig` files can now be picked recognized such that delta.lua files for zig treesitter parsers
+
+## History
+
+### [0.1.4] - 2026-06-06 to 2026-06-09
+
+- initial commit - 78f3750c07c299524bef5aab276de5fcd8625826
 
 #### Fixes
 - `get_window_width` now uses `vim.fn.getwininfo()` to derive window width and text offset, replacing individual `nvim_get_option_value` calls per gutter option.
-
-## History
 
 ### [0.1.3] - 2026-05-27 to 2026-06-02
 
