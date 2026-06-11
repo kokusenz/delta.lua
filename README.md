@@ -1,3 +1,7 @@
+# ARCHIVED
+
+This plugin has been archived. The intention of this plugin was to create a reusable module for different neovim plugins to consume, as diff viewing has many purposes in modern development workflows beyond just version control (git). While it has accomplished its goal by powering [deltaview.nvim](https://github.com/kokusenz/deltaview.nvim), I have come to the opinion that splitting this off from deltaview.nvim has created uneccessary complexity without any realized benefits thus far. I have merged the code in this codebase into deltaview.nvim (as of v0.4.0), doing my best to keep all commit history such that contributors will not lose the credit for their work.
+
 # delta.lua
 
 A recreation of [delta](https://github.com/dandavison/delta) (git-delta) in neovim, with treesitter syntax highlighting. Handles the creation of scratch buffers with the diff view. Exposes granular functions for the steps to create these buffers, so consumers can customize their view experience.
